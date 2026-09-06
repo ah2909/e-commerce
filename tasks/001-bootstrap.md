@@ -38,8 +38,8 @@ A new developer can start PostgreSQL, Redis, and Kafka locally, run the API, cal
 - [x] Liveness reports process health.
 - [x] Readiness fails when a required dependency is unavailable.
 - [x] Shutdown honors cancellation and a bounded timeout.
-- [ ] `make verify` passes from a clean checkout.
-- [ ] The `Backend verification` CI job passes; required checks fail on errors or missing prerequisites.
+- [x] `make verify` passes from a clean checkout.
+- [x] The `Backend verification` CI job passes; required checks fail on errors or missing prerequisites.
 - [x] Unit tests use the race detector where supported; integration tests execute against real PostgreSQL and fail if required dependencies are unavailable.
 - [x] README documents setup and troubleshooting.
 - [x] No credentials are committed.
@@ -50,12 +50,12 @@ Use `$ecommerce-delivery` for `tasks/001-bootstrap.md`. First inspect all refere
 
 ## Delivery record
 
-- Active task: yes
+- Active task: no
 - Execution mode: automatic
-- Stage: external CI verification pending
+- Stage: complete
 - Plan revision and approval: approved by the user on 2026-09-06
 - Go module path: `github.com/ah2909/e-commerce`, supplied by the user on 2026-09-06
-- Pending gates: clean-checkout verification and hosted GitHub Actions, unavailable until the workspace is initialized and published
+- Pending gates: none
 
 ### Proposed plan
 
@@ -84,7 +84,7 @@ Use `$ecommerce-delivery` for `tasks/001-bootstrap.md`. First inspect all refere
 - Operational health endpoints remain outside `/api/v1` and do not expose secrets or raw dependency errors.
 - Kafka unavailability must not make the API unready; later worker/event tasks will define Kafka runtime readiness and retry behavior.
 - Docker image tags and Go module/tool versions are pinned for reproducibility. Updating them remains a maintenance responsibility.
-- The workspace is not currently a Git repository, so clean-checkout and hosted CI behavior can be reproduced locally but cannot be proven against a committed baseline until Git is initialized elsewhere.
+- The workspace is initialized on `main` and published to the private `ah2909/e-commerce` GitHub repository.
 
 ### Implementation and review results
 
@@ -95,4 +95,4 @@ Use `$ecommerce-delivery` for `tasks/001-bootstrap.md`. First inspect all refere
 - The API returned HTTP 200 from liveness and readiness, HTTP 503 when Redis was unavailable, and logged a clean signal-driven stop. The worker also logged a clean signal-driven stop.
 - Native Windows race testing was unavailable because CGO and GCC are absent. The Makefile enables `-race` on the Ubuntu CI runner and other supported non-Windows hosts.
 - Disposable containers, volumes, and the Compose network were removed after verification.
-- Authenticated lookup of `https://github.com/ah2909/e-commerce.git` returned `Repository not found`, so creating and publishing that external repository requires separate user authorization.
+- GitHub Actions run `34041968279` passed the clean Ubuntu backend verification and dependency cleanup in 5m31s on commit `e4eaccd`.
