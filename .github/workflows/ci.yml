@@ -1,0 +1,54 @@
+name: Project quality gates
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgres://ecommerce:ecommerce@localhost:5432/ecommerce?sslmode=disable
+      REDIS_ADDRESS: localhost:6379
+      KAFKA_BROKERS: localhost:9092
+      COMPOSE_PROJECT_NAME: ecommerce-ci
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Require bootstrap implementation
+        run: |
+          for file in go.mod Makefile .env.example; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error::Missing $file. Complete tasks/001-bootstrap.md; backend verification is unavailable."
+              exit 1
+            fi
+          done
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start disposable dependencies
+        id: dependencies
+        run: |
+          cp .env.example .env
+          make dev-deps
+      - name: Run verification
+        run: make verify
+      - name: Stop disposable dependencies
+        if: ${{ always() && (steps.dependencies.outcome == 'success' || steps.dependencies.outcome == 'failure' || steps.dependencies.outcome == 'cancelled') }}
+        run: make dev-deps-down
