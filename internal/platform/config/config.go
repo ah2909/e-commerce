@@ -12,24 +12,27 @@ import (
 )
 
 const (
-	defaultAppEnv            = "development"
-	defaultHTTPAddress       = ":8080"
-	defaultLogLevel          = "info"
-	defaultShutdownTimeout   = 10 * time.Second
-	defaultDependencyTimeout = 2 * time.Second
-	maxShutdownTimeout       = 2 * time.Minute
-	maxDependencyTimeout     = 30 * time.Second
+	defaultAppEnv                  = "development"
+	defaultHTTPAddress             = ":8080"
+	defaultLogLevel                = "info"
+	defaultShutdownTimeout         = 10 * time.Second
+	defaultDependencyTimeout       = 2 * time.Second
+	defaultTenantResolutionTimeout = 500 * time.Millisecond
+	maxShutdownTimeout             = 2 * time.Minute
+	maxDependencyTimeout           = 30 * time.Second
+	maxTenantResolutionTimeout     = 5 * time.Second
 )
 
 type Config struct {
-	AppEnv            string
-	HTTPAddress       string
-	LogLevel          slog.Level
-	DatabaseURL       string
-	RedisAddress      string
-	KafkaBrokers      []string
-	ShutdownTimeout   time.Duration
-	DependencyTimeout time.Duration
+	AppEnv                  string
+	HTTPAddress             string
+	LogLevel                slog.Level
+	DatabaseURL             string
+	RedisAddress            string
+	KafkaBrokers            []string
+	ShutdownTimeout         time.Duration
+	DependencyTimeout       time.Duration
+	TenantResolutionTimeout time.Duration
 }
 
 type LookupFunc func(string) (string, bool)
@@ -81,16 +84,21 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	tenantResolutionTimeout, err := duration(lookup, "TENANT_RESOLUTION_TIMEOUT", defaultTenantResolutionTimeout, maxTenantResolutionTimeout)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		AppEnv:            appEnv,
-		HTTPAddress:       httpAddress,
-		LogLevel:          logLevel,
-		DatabaseURL:       databaseURL,
-		RedisAddress:      redisAddress,
-		KafkaBrokers:      kafkaBrokers,
-		ShutdownTimeout:   shutdownTimeout,
-		DependencyTimeout: dependencyTimeout,
+		AppEnv:                  appEnv,
+		HTTPAddress:             httpAddress,
+		LogLevel:                logLevel,
+		DatabaseURL:             databaseURL,
+		RedisAddress:            redisAddress,
+		KafkaBrokers:            kafkaBrokers,
+		ShutdownTimeout:         shutdownTimeout,
+		DependencyTimeout:       dependencyTimeout,
+		TenantResolutionTimeout: tenantResolutionTimeout,
 	}, nil
 }
 

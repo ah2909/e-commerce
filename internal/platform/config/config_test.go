@@ -15,6 +15,7 @@ func TestLoadFrom(t *testing.T) {
 	values["KAFKA_BROKERS"] = "kafka-1:9092, kafka-2:9092"
 	values["SHUTDOWN_TIMEOUT"] = "15s"
 	values["DEPENDENCY_TIMEOUT"] = "3s"
+	values["TENANT_RESOLUTION_TIMEOUT"] = "750ms"
 
 	got, err := LoadFrom(mapLookup(values))
 	if err != nil {
@@ -29,6 +30,9 @@ func TestLoadFrom(t *testing.T) {
 	if got.ShutdownTimeout != 15*time.Second || got.DependencyTimeout != 3*time.Second {
 		t.Fatalf("LoadFrom() timeouts = %s, %s", got.ShutdownTimeout, got.DependencyTimeout)
 	}
+	if got.TenantResolutionTimeout != 750*time.Millisecond {
+		t.Fatalf("LoadFrom() TenantResolutionTimeout = %s", got.TenantResolutionTimeout)
+	}
 }
 
 func TestLoadFromDefaults(t *testing.T) {
@@ -41,6 +45,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	}
 	if got.ShutdownTimeout != defaultShutdownTimeout || got.DependencyTimeout != defaultDependencyTimeout {
 		t.Fatalf("LoadFrom() timeout defaults = %s, %s", got.ShutdownTimeout, got.DependencyTimeout)
+	}
+	if got.TenantResolutionTimeout != defaultTenantResolutionTimeout {
+		t.Fatalf("LoadFrom() tenant timeout default = %s", got.TenantResolutionTimeout)
 	}
 }
 
@@ -61,6 +68,7 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "invalid log level", key: "LOG_LEVEL", value: "verbose", want: "LOG_LEVEL"},
 		{name: "zero shutdown", key: "SHUTDOWN_TIMEOUT", value: "0s", want: "SHUTDOWN_TIMEOUT"},
 		{name: "large dependency timeout", key: "DEPENDENCY_TIMEOUT", value: "31s", want: "DEPENDENCY_TIMEOUT"},
+		{name: "large tenant resolution timeout", key: "TENANT_RESOLUTION_TIMEOUT", value: "6s", want: "TENANT_RESOLUTION_TIMEOUT"},
 	}
 
 	for _, test := range tests {

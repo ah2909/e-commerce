@@ -67,10 +67,27 @@ make dev-deps-down
 | `HTTP_ADDRESS` | `:8080` | API listen address. |
 | `LOG_LEVEL` | `debug` | `slog` level such as `debug`, `info`, `warn`, or `error`. |
 | `DATABASE_URL` | Local PostgreSQL URL | PostgreSQL connection URL; required outside Make defaults. |
+| `TEST_DATABASE_URL` | Local `ecommerce_test` PostgreSQL URL | Isolated database used only by integration tests and benchmarks. |
+| `ALLOW_TEST_DATABASE_MUTATION` | `true` through Make | Explicit sentinel required before integration tests may mutate the test database. |
 | `REDIS_ADDRESS` | `localhost:6379` | Redis host and port; required outside Make defaults. |
 | `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers; required outside Make defaults. |
 | `SHUTDOWN_TIMEOUT` | `10s` | Maximum graceful API shutdown time; must be positive and no more than two minutes. |
 | `DEPENDENCY_TIMEOUT` | `2s` | Readiness-check deadline; must be positive and no more than 30 seconds. |
+| `TENANT_RESOLUTION_TIMEOUT` | `500ms` | Store-membership lookup deadline; must be positive and no more than 5 seconds. |
+
+New stores default omitted regional settings to `VND`, `vi-VN`, and `Asia/Ho_Chi_Minh`. Explicit valid currency, locale, and timezone values remain supported for stores in other markets. Store names preserve Vietnamese diacritics and are normalized to Unicode NFC.
+
+Apply forward-only database migrations before starting code that uses new tables:
+
+```bash
+make migrate-up
+```
+
+Use `make migrate-status` to inspect the runtime database migration version. Schema recovery uses a forward-fix migration rather than a destructive down migration.
+
+Integration tests and store-context benchmarks use `TEST_DATABASE_URL`, require `ALLOW_TEST_DATABASE_MUTATION=true`, and refuse non-loopback hosts or database names without the `_test` suffix. The disposable Compose PostgreSQL initializes `ecommerce_test` separately from the runtime `ecommerce` database.
+
+Run `make benchmark-store-context` with PostgreSQL available to reproduce the tenant middleware and indexed membership-resolution baselines. Benchmark results are evidence for comparison and are not enforced as machine-dependent CI latency limits.
 
 `.env.example` contains disposable local credentials only. Keep production credentials in the deployment environment and out of this repository.
 

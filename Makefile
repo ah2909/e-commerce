@@ -6,11 +6,14 @@ APP_ENV ?= development
 HTTP_ADDRESS ?= :8080
 LOG_LEVEL ?= debug
 DATABASE_URL ?= postgres://ecommerce:ecommerce@localhost:5432/ecommerce?sslmode=disable
+TEST_DATABASE_URL ?= postgres://ecommerce:ecommerce@localhost:5432/ecommerce_test?sslmode=disable
+ALLOW_TEST_DATABASE_MUTATION ?= true
 REDIS_ADDRESS ?= localhost:6379
 KAFKA_BROKERS ?= localhost:9092
 SHUTDOWN_TIMEOUT ?= 10s
 DEPENDENCY_TIMEOUT ?= 2s
-export COMPOSE_PROJECT_NAME APP_ENV HTTP_ADDRESS LOG_LEVEL DATABASE_URL REDIS_ADDRESS KAFKA_BROKERS SHUTDOWN_TIMEOUT DEPENDENCY_TIMEOUT
+TENANT_RESOLUTION_TIMEOUT ?= 500ms
+export COMPOSE_PROJECT_NAME APP_ENV HTTP_ADDRESS LOG_LEVEL DATABASE_URL TEST_DATABASE_URL ALLOW_TEST_DATABASE_MUTATION REDIS_ADDRESS KAFKA_BROKERS SHUTDOWN_TIMEOUT DEPENDENCY_TIMEOUT TENANT_RESOLUTION_TIMEOUT
 
 ifeq ($(OS),Windows_NT)
 EXE := .exe
@@ -27,7 +30,7 @@ endif
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint$(EXE)
 GOVULNCHECK := $(TOOLS_DIR)/govulncheck$(EXE)
 
-.PHONY: tools fmt fmt-check lint test test-integration vulncheck verify dev-deps dev-deps-down run-api run-worker
+.PHONY: tools fmt fmt-check lint test test-integration vulncheck verify dev-deps dev-deps-down run-api run-worker migrate-up migrate-status migrate-test-up migrate-test-status benchmark-store-context
 
 tools: $(GOLANGCI_LINT) $(GOVULNCHECK)
 
@@ -51,7 +54,7 @@ lint: $(GOLANGCI_LINT)
 test:
 	go test $(RACE_FLAG) ./...
 
-test-integration:
+test-integration: migrate-test-up
 	go test $(RACE_FLAG) -tags=integration ./...
 
 vulncheck: $(GOVULNCHECK)
@@ -70,3 +73,19 @@ run-api:
 
 run-worker:
 	go run ./cmd/worker
+
+migrate-up:
+	go run ./cmd/migrate up
+
+migrate-status:
+	go run ./cmd/migrate status
+
+migrate-test-up:
+	go run ./cmd/migrate test-up
+
+migrate-test-status:
+	go run ./cmd/migrate test-status
+
+benchmark-store-context: migrate-test-up
+	go test -run=^$$ -bench=BenchmarkMiddlewareResolved -benchmem -benchtime=1s ./internal/platform/tenant
+	go test -tags=integration -run=^$$ -bench=BenchmarkResolveTenantPostgres -benchmem -benchtime=1s ./internal/stores/infrastructure/postgres
