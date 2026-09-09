@@ -57,7 +57,10 @@ Cross-store denial is an acceptance criterion, not optional security hardening.
 - Reservation creation and ledger/order rollback together on transaction failure.
 - Confirm, release, and expire are idempotent.
 - Confirmation racing expiration has one deterministic winner and preserves quantity.
+- PostgreSQL interleaving tests hold the shared order/payment/reservation/stock locks in both directions and prove that confirmation commits decremented `on_hand`, closed reservations, matching ledger totals, paid states, and facts—or reconciliation with unchanged stock—never a partial mix.
+- Multi-variant confirmation and concurrent adjustment tests prove stable lock ordering, guarded stock versions, unchanged availability after sale, and no deadlock or oversell.
 - Expiry workers can run concurrently with safe bounded claims.
+- Duplicate non-locking expiry discovery is harmless: one worker claims the order first, and no worker holds a reservation while waiting for that order.
 - Manual adjustment requires reason, permission, and audit; audit failure rolls back adjustment.
 
 ### Checkout and orders
@@ -77,6 +80,7 @@ Cross-store denial is an acceptance criterion, not optional security hardening.
 - MoMo fixtures cover valid signature, invalid signature, wrong merchant, store, amount, currency, reference, duplicate event, malformed body, provider 4xx/5xx, timeout, and cancellation.
 - Webhook raw bytes are verified before parsing-dependent mutation.
 - A late success, wrong amount, or wrong reference creates one reconciliation item and does not restore an expired order.
+- Confirmation racing expiry or cancellation uses database time and one fixed lock order; deterministic tests cover both winners, reject deadlocks or indefinite retry, and assert only committed confirmation facts or only expiry/reconciliation facts are emitted.
 - Repeated webhook/provider response processing has one business effect and returns the documented acknowledgement.
 - Full refund requests are authorized, audited, amount-bounded, and idempotent.
 - MoMo refund retry and callback duplication have one result; manual VietQR settlement requires independent recorded confirmation.
@@ -87,6 +91,8 @@ Cross-store denial is an acceptance criterion, not optional security hardening.
 - Aggregate change and outbox insert commit or roll back together.
 - A crash after Kafka publish but before marking the outbox row may republish safely.
 - Consumer inbox deduplicates concurrent and sequential delivery in the same transaction as its effect.
+- Two stores may process the same `event_id` independently; inbox lookup and uniqueness include validated `store_id`, and an envelope/effect store mismatch fails closed.
+- Replaying payment-confirmed events cannot transition Orders or Inventory because those states committed before publication.
 - Unknown additive fields are tolerated; unsupported versions and malformed envelopes enter an observable terminal path.
 - Store scope, correlation, aggregate identity/version, and personal-data restrictions are contract-tested.
 

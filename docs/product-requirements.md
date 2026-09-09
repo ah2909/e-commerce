@@ -31,7 +31,7 @@ This document defines intended behavior. [Development status](development-status
 - Store owners and staff cannot create tenants.
 - Accounts, customers, staff memberships, catalogs, inventories, carts, orders, payments, provider configuration, and audit records belong to exactly one store.
 - The same person may independently register the same email or social identity at different stores; no account or data is linked across stores.
-- A customer-managed deployment uses the same binaries and modules. Trusted deployment configuration supplies its store-routing policy and the customer operates its infrastructure.
+- A customer-managed deployment uses the same binaries and modules. In single-store mode, one exact configured tenant host maps server-side to one configured `store_id`; in multi-store mode, immutable subdomains resolve beneath a configured base domain. Platform/authentication hosts remain distinct, and caller fields never select a store.
 - Custom storefront domains and SaaS subscription billing are not part of the MVP.
 
 ## MVP capabilities
@@ -59,7 +59,7 @@ This document defines intended behavior. [Development status](development-status
 - Variant-level on-hand stock, immutable adjustment ledger, and atomic reservations.
 - No backorders: available stock may not become negative.
 - Checkout reserves inventory for ten minutes.
-- Payment confirmation consumes a reservation; expiration or cancellation releases it idempotently.
+- Payment confirmation consumes the reserved physical stock and closes the reservation atomically; expiration or cancellation releases the reservation idempotently without changing `on_hand`.
 
 ### Customer, cart, and checkout
 

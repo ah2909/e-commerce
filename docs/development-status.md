@@ -3,7 +3,7 @@
 ## Snapshot
 
 - Assessed: 2026-09-09
-- Base commit: 76caad7783c8accd52fd031113c10c7d74373223 plus the current uncommitted task 004 and task 005 working tree
+- Implemented baseline: commit `a78d970c7e8658faa42ac9c998567d822d6bee4d`, plus the current task 005 documentation-fix working tree
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -24,9 +24,9 @@ This is the authoritative current-state summary. Detailed historical evidence re
 | Slice | Status | Evidence and gap |
 | --- | --- | --- |
 | Foundation | Implemented and accepted | API/worker entry points, configuration, logging, health checks, Compose dependencies, migration runner, CI, Make verification targets, and guarded integration database are recorded complete in [task 001](../tasks/archive/001-bootstrap.md). Current working-tree checks are recorded below. |
-| Tenant context | Implemented and accepted at task 003, subsequently modified | Store persistence, tenant middleware, and isolation baseline passed task 003. Task 004 changed subdomain and host resolution, so the modified surface requires task 004 re-review before the current version is accepted. |
-| Platform administration | Implemented; conditionally usable | A base-domain provisioning route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. The portable verification bootstrap passed review and consolidated checks. Independent re-review still requires changes because the user deferred two MVP risks. |
-| Identity and workforce authorization | Implemented; conditionally usable | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; two medium review findings remain explicitly deferred. |
+| Tenant context | Implemented, changes required | Store persistence, tenant middleware, and the task 003 isolation baseline exist. Task 004 changed host and session behavior; re-review completed with the two deferred medium findings below. Current routing implements shared-base-domain subdomains, not the target customer-managed exact-host single-store mode. |
+| Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed, but the store-suspension/session race keeps the shared security boundary unaccepted. |
+| Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission remain explicitly deferred. |
 | Catalog | Not started | No Catalog module or catalog schema exists. |
 | Pricing and coupons | Not started | No Money value object, Pricing module, price/coupon schema, or contract exists. |
 | Inventory | Not started | No stock item, reservation, ledger, expiry worker, or concurrency implementation exists. |
@@ -59,7 +59,7 @@ The schema intentionally does not include platform operators. It also does not i
 
 Task 004 revision 5 implements the corrections requested by the prior reviews and the latest finding fixes: explicit platform-token injection, disabled-user refresh-family revocation, current-state social session admission, non-enumerating malformed membership handling, and bounded unauthenticated base64url parsing.
 
-Independent architecture and security re-review completed with changes required. On 2026-09-09, the user explicitly deferred two medium findings for the initial MVP: API-clock-based credential expiry can diverge under clock skew, and store suspension is not atomic with session issuance. The findings remain unresolved and prevent full task acceptance under the current workflow even if final verification passes. Residual validation also remains for live Google/Facebook interoperability, real ingress proxy configuration, production-size migration locking, race-enabled CI, and production secret rotation.
+Independent architecture and security re-review completed with changes required. On 2026-09-09, the user explicitly deferred two medium findings for the initial MVP: API-clock-based credential expiry can diverge under clock skew, and store suspension is not atomic with session issuance. On the same date, the user elected to skip further task 004 work for now. The findings remain unresolved and prevent full task acceptance or production use. Residual validation also remains for live Google/Facebook interoperability, real ingress proxy configuration, customer-managed exact-host routing, production-size migration locking, race-enabled CI, and production secret rotation.
 
 ## Alignment that is already present
 
@@ -110,8 +110,8 @@ Task 004 consolidated MVP verification on 2026-09-09: full unit and integration 
 
 ## Required next work
 
-1. Review and finish task 005 documentation standardization.
-2. Revisit database-authoritative expiry and atomic suspension/session admission before horizontal scaling or production store-suspension workflows.
-3. Begin Catalog with task 004 treated as conditionally usable rather than fully workflow-approved.
+1. Fix and re-review task 005 documentation standardization, then run its final documentation checks.
+2. Begin Catalog with task 004 explicitly treated as unaccepted and deferred.
+3. Before production, reopen task 004 to address database-authoritative expiry and atomic suspension/session admission.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

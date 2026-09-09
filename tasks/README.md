@@ -14,8 +14,8 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 | Task | State | Next gate |
 | --- | --- | --- |
-| [004 Identity and authorization](004-identity-authorization.md) | Revision 5 implemented with focused checks passing | Independent architecture/security review |
-| [005 Documentation and status standardization](005-correct-system-design-documentation.md) | Implementation stage | Independent architecture/security review after build |
+| [004 Identity and authorization](004-identity-authorization.md) | Revision 5 verified for continued development; two medium findings deferred and task inactive | Reopen with `$ec-fix` before production |
+| [005 Documentation and status standardization](005-correct-system-design-documentation.md) | Reviews passed and user accepted; final verification explicitly skipped, task inactive | Reopen with `$ec-test` only if verification evidence is required |
 
 ## Archived tasks
 

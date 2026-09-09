@@ -21,7 +21,7 @@ Every tenant event envelope contains:
 }
 ```
 
-- Consumers deduplicate by `(consumer_name,event_id)` or an equivalent unique business key in the same transaction as their effect.
+- Consumers deduplicate by `(store_id,consumer_name,event_id)` or an equally tenant-scoped unique business key in the same transaction as their effect. The validated envelope `store_id` must match the inbox row and affected business records.
 - Ordering is guaranteed only where the chosen topic key and consumer design provide it. Consumers validate aggregate version/state and tolerate duplicates and unrelated reordering.
 - Additive optional fields may be added compatibly. Removing, renaming, changing meaning/type, or newly requiring a field creates a new event version.
 - Payloads contain the minimum identifiers and snapshot data needed by consumers. Credentials, token material, raw provider bodies, and unnecessary personal data are forbidden.
@@ -55,7 +55,7 @@ Search consumers fetch authorized projections or receive only the minimal public
 | --- | --- | --- | --- |
 | `inventory.changed.v1` | Inventory | Analytics, low-stock notification | store, variant, ledger entry, reason |
 | `inventory.reserved.v1` | Inventory | Operations metrics | store, reservation, order, variant, expiry |
-| `inventory.reservation_expired.v1` | Inventory | Orders contract, operations metrics | store, reservation, order, variant |
+| `inventory.reservation_expired.v1` | Inventory | Operations metrics | store, reservation, order, variant |
 | `inventory.reservation_released.v1` | Inventory | Operations metrics | store, reservation, order, variant, reason |
 | `inventory.reservation_confirmed.v1` | Inventory | Analytics | store, reservation, order, variant |
 
@@ -80,21 +80,21 @@ Email consumers receive a purpose-limited contact snapshot or retrieve it throug
 | Event | Producer | Initial consumers | Required payload identifiers |
 | --- | --- | --- | --- |
 | `payment.action_required.v1` | Payments | Storefront response/projection | store, order, payment, attempt, provider, expiry |
-| `payment.confirmed.v1` | Payments | Orders/Inventory contract, email | store, order, payment, provider |
+| `payment.confirmed.v1` | Payments | Email, analytics | store, order, payment, provider |
 | `payment.failed.v1` | Payments | Orders, notification | store, order, payment, attempt, failure class |
 | `payment.reconciliation_required.v1` | Payments | Operations notification | store, payment/attempt, reason |
 | `refund.requested.v1` | Payments | Refund worker, operations | store, order, payment, refund |
 | `refund.succeeded.v1` | Payments | Orders, Inventory policy, email | store, order, payment, refund |
 | `refund.failed.v1` | Payments | Operations notification | store, order, payment, refund, failure class |
 
-`payment.confirmed.v1` is emitted only after a validated MoMo result or audited VietQR confirmation is durable. A duplicate webhook or manual command reuses the existing outcome and does not emit a second business transition. Late or mismatched funds emit reconciliation, not confirmation.
+`payment.confirmed.v1`, `order.paid.v1`, and `inventory.reservation_confirmed.v1` describe business states already committed together by the payment-confirmation transaction. Their consumers do not transition Orders or Inventory. A duplicate webhook or manual command reuses the existing outcome and does not emit a second business transition. Late, expired, cancelled, or mismatched funds emit reconciliation only.
 
 ## Publication and consumption
 
 ### Outbox publisher
 
 - Claims unpublished rows in bounded batches with concurrent-worker-safe locking.
-- Uses `event_id` as the producer idempotency identity when the Kafka client supports it.
+- Uses `(store_id,event_id)` as the producer idempotency identity when the Kafka client supports composite identities; otherwise it encodes both values into the producer key.
 - Records attempts, next-attempt time, last failure class, and publication metadata.
 - Retries transient broker errors with bounded exponential backoff and jitter.
 - Exposes oldest unpublished age, retry count, and terminal failures.

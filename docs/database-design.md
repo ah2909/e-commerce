@@ -71,7 +71,6 @@ The initial release stores no platform identity rows. Store provisioning is auth
 | `stores` | Tenant identity, immutable subdomain, regional defaults, status | PK `store_id`; unique normalized subdomain; status/settings checks |
 | `store_memberships` | Workforce role and status | PK `(store_id,user_id)`; tenant FK to users; active-owner concurrency rule |
 | `store_staff_permissions` | Optional explicit staff permissions | PK `(store_id,user_id,permission)`; tenant FK to membership |
-| `store_shipping_settings` | Free/flat shipping policy | one active version per store; non-negative VND amount |
 
 Subdomain lookup has a global unique index because routing occurs before tenant authentication. Normal store APIs still load by `store_id` after resolution.
 
@@ -123,7 +122,9 @@ Amounts, minimums, and maximums are non-negative. Percentage uses an integer bas
 | `inventory_reservations` | Ten-minute order allocation | PK `(store_id,reservation_id)`; unique `(store_id,order_id,variant_id)`; active expiry index |
 | `inventory_ledger_entries` | Immutable quantity audit | PK `(store_id,ledger_entry_id)`; variant/time and business-reference indexes |
 
-Reservation mutation locks the stock item or uses one guarded atomic update. The invariant is checked in the same transaction as reservation creation. Expiry workers query a partial index on active rows ordered by `expires_at` and claim with `FOR UPDATE SKIP LOCKED` in bounded batches.
+`on_hand` is physical stock and active reservations reduce only computed availability. Reservation creation does not decrement `on_hand`; confirmation atomically decrements it, closes the active reservation, and appends an equal inventory-ledger delta. Reservation mutation locks the stock item or uses one guarded atomic update. The invariant is checked in the same transaction as reservation creation or confirmation.
+
+Expiry workers use the active-reservation expiry index to discover a bounded set of distinct `(store_id,order_id)` candidates without retaining reservation locks. Each candidate is processed in its own transaction: claim the order row first with `FOR UPDATE SKIP LOCKED`, then lock payment, reservations ordered by reservation ID, and stock items ordered by variant ID. After acquiring all locks, recheck order/payment/reservation state and database time before expiring the order and active reservations without changing `on_hand`. Duplicate discovery is safe because a competing worker cannot claim the same order row, and no path acquires a reservation lock before the order lock.
 
 ### Customers
 
@@ -180,15 +181,20 @@ Provider configuration ciphertext contains algorithm, nonce, ciphertext, and key
 
 Order shipping snapshots do not depend on the current rule. Tracking numbers are identifiers, not secrets or access credentials.
 
-### Audit and events
+### Audit
 
 | Table | Purpose | Important constraints/indexes |
 | --- | --- | --- |
 | `audit_records` | Immutable privileged/financial action with actor type and identifier | PK `(store_id,audit_id)`; store/time and subject/time indexes |
-| `outbox_events` | Transactional integration facts | PK `event_id`; store/aggregate version uniqueness; unpublished claim index |
-| `consumer_inbox` | Consumer-specific event deduplication | PK `(consumer_name,event_id)`; processed/retention index |
 
-Outbox `event_id` may be globally unique because it is infrastructure identity, but tenant-owned payload and aggregate references still include `store_id`. The publisher does not update business aggregates.
+### Eventing
+
+| Table | Purpose | Important constraints/indexes |
+| --- | --- | --- |
+| `outbox_events` | Transactional integration facts | PK `(store_id,event_id)`; tenant aggregate/version uniqueness; unpublished claim index |
+| `consumer_inbox` | Consumer-specific event deduplication | PK `(store_id,consumer_name,event_id)`; processed/retention index |
+
+Eventing owns the outbox/inbox schema, repositories, publisher, and delivery-deduplication contract. A producing module owns its event semantics and appends through Eventing's transaction-aware interface. Every insert, lookup, claim, uniqueness rule, and aggregate reference includes the envelope's validated `store_id`; an `event_id` never establishes tenant scope by itself. The publisher does not update business aggregates.
 
 ## Critical transaction boundaries
 
@@ -202,7 +208,7 @@ One transaction validates cart ownership, persists price/shipping/address snapsh
 
 ### Payment confirmation
 
-Webhook or manual confirmation deduplication, payment transition, reservation confirmation, order transition, audit where applicable, and outbox writes commit atomically or are coordinated through a documented idempotent application contract. No consumer relies on an uncommitted provider result.
+Payments coordinates one PostgreSQL transaction for validated webhook success or audited manual confirmation. Competing confirmation, expiry, and cancellation workflows use one global lock order: order, payment, reservations ordered by reservation ID, then affected `inventory_stock_items` ordered by variant ID. After locking, the transaction reads database time and rechecks all states and deadlines. If the order remains payable and every reservation is active and unexpired, guarded stock updates decrement each stock item's `on_hand` by its reserved quantity, reservation confirmation and matching immutable ledger deltas record the consumption, and receipt/manual-command deduplication, payment success, order payment, audit where applicable, and outbox facts commit together. A missing row, insufficient `on_hand`, version conflict, or ledger failure rolls back every effect. If expiry or cancellation has committed, any reservation is no longer active, or the database deadline has passed, the same transaction records the received funds as reconciliation required and emits no payment-confirmed, order-paid, reservation-confirmed, or stock-changed fact. Concurrent inventory adjustment locks stock rows by the same variant ordering before its guarded update. No consumer completes these business transitions from an event.
 
 ### Cancellation and refund
 

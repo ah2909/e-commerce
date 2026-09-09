@@ -27,7 +27,7 @@ Rules:
 
 ### Store
 
-Fields include identity, immutable subdomain, name, status, VND default currency, `vi-VN` locale, `Asia/Ho_Chi_Minh` timezone, shipping settings, and settings version.
+Fields include identity, immutable subdomain, name, status, VND default currency, `vi-VN` locale, `Asia/Ho_Chi_Minh` timezone, and settings version. Shipping owns shipping rules.
 
 ### Membership
 
@@ -121,8 +121,9 @@ Rules:
 
 - Available quantity cannot become negative; backorders are unsupported.
 - Reserve, confirm, release, and expire operations are atomic and idempotent.
+- Confirmation decrements `on_hand` by the reserved quantity, closes the active reservation, and appends the matching ledger delta in the payment-confirmation transaction.
 - Concurrent buyers cannot both reserve the last unit.
-- Reservation expiry uses database time semantics and a worker that safely claims bounded batches.
+- Reservation expiry discovers bounded candidate orders without retaining reservation locks, claims one order first, acquires the shared global lock order, and then rechecks database time and state.
 - A late payment does not reactivate an expired reservation.
 - Manual adjustment requires a reason, permission, and audit record.
 
@@ -210,6 +211,7 @@ Rules:
 - VietQR generation produces `action_required`; only an authorized audited confirmation produces success.
 - MoMo success requires a verified provider response or raw-body signed webhook.
 - Late, wrong-amount, or wrong-reference funds enter reconciliation and do not restore expired commerce state automatically.
+- Confirmation locks and rechecks order, payment, reservations, and stock items in the global order using database time; it either consumes `on_hand` and commits all ledger/paid/confirmed states together or records received funds for reconciliation.
 
 ## Refund
 
@@ -248,7 +250,7 @@ Rules:
 
 - Tenant provisioning: Platform administration coordinates Stores, Identity, membership, and Audit in one transaction.
 - Checkout: Orders coordinates Carts, Catalog, Pricing, Inventory, Customers, Shipping, Payments, and outbox contracts in one transaction boundary where required.
-- Payment confirmation: Payments durably accepts one provider/manual result, then Orders and Inventory apply idempotent state changes under an explicit contract.
+- Payment confirmation: Payments coordinates one transaction across module-owned repositories. A valid on-time result atomically decrements physical `on_hand`, appends matching ledger entries, confirms reservations, and commits payment success, order payment, audit where required, deduplication, and outbox facts; an expiry/cancellation winner commits reconciliation instead.
 - Cancellation/refund: Orders validates eligibility, Payments owns refund execution, Inventory owns release/restock, and Audit records privileged actions.
 
 Detailed table ownership and constraints are in [database design](database-design.md); integration facts are in the [event catalog](event-catalog.md).

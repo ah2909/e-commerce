@@ -49,7 +49,8 @@ All internet-facing requests pass through trusted TLS termination. Host validati
 ### Customer-managed
 
 - The same API, worker, migrations, and module contracts are deployed by the customer.
-- Trusted deployment configuration supplies the base domain and whether one or several stores are hosted.
+- Trusted deployment configuration selects one routing mode. Single-store mode maps one exact configured tenant host to one configured `store_id`; multi-store mode resolves `{store}.{base-domain}` through the persisted immutable subdomain.
+- The platform/authentication hosts are configured separately from tenant hosts and never resolve to a store. Requests cannot select or override `store_id` through a path, header, query, or body field.
 - The customer owns TLS, secrets, backups, monitoring, dependency lifecycle, and disaster recovery.
 - The application does not weaken tenant scoping in a single-store deployment; this prevents configuration changes from exposing unscoped access paths.
 
@@ -72,7 +73,7 @@ Custom domains and automatic cross-deployment data movement require later ADRs.
 | --- | --- | --- |
 | Platform administration | deployment-token authentication and tenant provisioning policy | provision store |
 | Identity | users, credentials, social links, sessions, guest principals | authenticate store-bound principal |
-| Stores | stores, subdomains, memberships, roles, store settings | resolve store, authorize membership, read settings |
+| Stores | stores, subdomains, memberships, roles, regional settings | resolve store, authorize membership, read regional settings |
 | Catalog | products, variants, categories, options, media references | read sellable variant snapshot |
 | Pricing | price lists, prices, coupons, discount evaluation | resolve authoritative checkout price |
 | Inventory | stock items, reservations, stock ledger | reserve, confirm, release stock |
@@ -82,8 +83,9 @@ Custom domains and automatic cross-deployment data movement require later ADRs.
 | Payments | provider settings, payment attempts, webhooks, reconciliation, refunds | initiate and confirm payment/refund |
 | Shipping | flat/free rules, shipment record, manual tracking | quote shipping, record fulfillment |
 | Audit | immutable privileged-action records | append audit record in required transaction |
+| Eventing | outbox/inbox persistence, publication, delivery deduplication | append fact in caller transaction, claim publications, deduplicate consumption |
 
-A module exclusively owns its tables and domain rules. Another module calls an application interface; it does not query the owner's tables. Cross-module transactions are exceptional and explicit. Checkout and tenant provisioning use an application-level unit of work whose participating repositories remain module-owned.
+A module exclusively owns its tables and domain rules. Another module calls an application interface; it does not query the owner's tables. Cross-module transactions are exceptional and explicit. Checkout, tenant provisioning, payment confirmation, and order expiry use an application-level unit of work whose participating repositories remain module-owned. Eventing owns outbox/inbox mechanics while each producer owns the meaning and versioning of its facts.
 
 ## Dependency direction
 
@@ -134,7 +136,11 @@ Expired, late, wrong-reference, or wrong-amount transfers enter a reconciliation
 
 ### MoMo
 
-The Payments module creates a store-scoped attempt with a unique idempotency key and bounded provider timeout. Callback and webhook handlers validate the signature from the raw body, provider merchant identity, amount, currency, order reference, and event uniqueness before changing state. Duplicate events acknowledge the prior result. A valid success confirms the payment and inventory once; late success enters reconciliation.
+The Payments module creates a store-scoped attempt with a unique idempotency key and bounded provider timeout. Callback and webhook handlers validate the signature from the raw body, provider merchant identity, amount, currency, order reference, and event uniqueness before changing state. Duplicate events acknowledge the prior result.
+
+Validated MoMo success and audited VietQR confirmation use one PostgreSQL transaction coordinated by Payments. Every competing workflow locks the order, payment, reservations ordered by reservation ID, and affected stock items ordered by variant ID in that global order, then rechecks states and reservation deadlines using database time. If the order is still payable and every reservation is active, guarded stock updates decrement `on_hand` by each reserved quantity, the transaction appends matching ledger entries, confirms the reservations, marks the payment succeeded and order paid, records receipt/audit data, and writes the resulting outbox facts atomically. Any failed stock invariant rolls back the complete transition. If expiry or cancellation already won, or the database deadline has passed, it records the received funds as reconciliation required and emits only that fact; it never revives the order or inventory.
+
+The expiry worker discovers a bounded set of candidate order IDs without retaining row locks. It processes one candidate per transaction by first claiming the order row with `FOR UPDATE SKIP LOCKED`, then acquiring the remaining global-order locks and rechecking state and database time. If confirmation already committed, expiry is a no-op; if expiry commits first, a later confirmed transfer enters reconciliation. Candidate duplication across workers is harmless because only one can claim and transition the order.
 
 ### Cancellation and refund
 
@@ -143,10 +149,12 @@ An unpaid order may be cancelled by its customer/guest or authorized staff, rele
 ## Event delivery
 
 - The producing module writes an outbox row in the same transaction as its aggregate change.
+- Commerce events describe an already committed outcome; consumers do not use `payment.confirmed.v1` to transition Orders or Inventory.
 - Workers claim rows in bounded batches using locking that permits concurrent publishers.
 - Publication is at least once. A publish marker is diagnostic, not proof that a consumer applied the event.
 - Consumers with business effects use a durable inbox or an equivalent unique constraint in the same transaction as the effect.
 - Events include `event_id`, `event_type`, `schema_version`, `occurred_at`, `store_id`, `aggregate_type`, `aggregate_id`, `correlation_id`, and a minimal payload.
+- Outbox and inbox identities include `store_id`; one tenant's event identifier cannot deduplicate or suppress another tenant's work.
 - Events may be out of order across aggregates. Consumers use aggregate version or explicit state checks where order matters.
 - Credentials, raw provider payloads, access tokens, and unnecessary personal data are excluded.
 

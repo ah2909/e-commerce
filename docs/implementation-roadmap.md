@@ -51,7 +51,8 @@ This file describes intended sequence, not completion. [Development status](deve
     - Concurrent outbox publisher, Kafka topics, consumer inbox/deduplication, dead-letter/reconciliation handling, email example, search projection, analytics, and backlog observability.
 
 14. **Operational hardening**
-    - Deployment configuration, secret/key rotation, dashboards, alerts, slow-query review, backup/PITR, restore exercise, dependency upgrades, security testing, capacity/load testing, runbooks, and explicit RPO/RTO/SLO approval.
+    - Implement and verify customer-managed exact-host single-store routing and subdomain multi-store routing without caller-selected tenant scope.
+    - Complete deployment configuration, secret/key rotation, dashboards, alerts, slow-query review, backup/PITR, restore exercise, dependency upgrades, security testing, capacity/load testing, runbooks, and explicit RPO/RTO/SLO approval.
 
 ## Release milestones
 
