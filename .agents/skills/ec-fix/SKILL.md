@@ -5,7 +5,7 @@ description: "Fix supported review findings within an approved e-commerce task a
 
 # ec-fix
 
-Read [the project workflow](../../../docs/development-workflow.md), especially Reusable stage commands and section 4. Resolve the active task and select stage-only execution using the shared rules.
+Read [the project workflow](../../../docs/development-workflow.md), especially Commands and section 4. Resolve the active task and select stage-only execution for this turn using the shared rules.
 
 Establish user approval of the applicable plan, then inspect the findings against current code. Fix supported issues within that scope and run meaningful regression tests. If there are no actionable in-scope findings, report that and stop; do not invent improvements. Surface findings requiring a material scope decision before dependent edits.
 

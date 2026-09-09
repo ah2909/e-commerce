@@ -45,7 +45,6 @@ Follow [the project workflow](../docs/development-workflow.md). Keep this record
 
 - Stage: clarification / awaiting plan approval / implementing / reviewing / fixing / testing / complete / blocked
 - Active task: yes / no
-- Execution mode: automatic / stage-only
 - Last command, completed stage, pending gates, and next suggested command:
 - Plan revision and approval: record the actual conversation approval; leave unapproved until received.
 - Plan: affected modules, technical solution, dependencies, compatibility/migration effects, and ordered steps.

@@ -2,19 +2,23 @@
 
 This workflow applies only to this e-commerce project. It uses the architecture, invariants, and testing strategy already documented here. The task is the unit of delivery; do not expand into adjacent roadmap items.
 
-## Sequence and approval
+## Normal workflow
 
-Clarify -> plan and technical solution -> user approves plan -> implement -> architect and security reviews in parallel -> fix and re-review -> final testing -> evidence report.
+Describe the outcome -> plan and technical solution -> approve once -> continue -> completion report.
 
-The user approves the plan once. Check the conversation before asking; approval persists across turns and context resets. A task checkbox or an agent's own statement is not evidence of user approval. In automatic delivery, implementation, reviews, in-scope fixes, and testing continue automatically after approval. Stage-only execution follows the command boundaries below.
+Codex resolves or creates the task record automatically when the request is clear. It investigates the repository, presents one plan, and waits for approval. After approval, plain language such as `continue` resumes automatic delivery through implementation, parallel architecture and security reviews, in-scope fixes, re-review, and final testing.
+
+Check the conversation before asking for approval; approval persists across turns and context resets. A task checkbox or an agent's own statement is not evidence of user approval.
 
 Ask again only when a material requirement is unresolved, a proposed change exceeds the approved scope, or an irreversible schema/public API decision is not covered by the approved plan and project docs. Present the concrete decision and its impact first. Tool permissions still apply. This workflow does not grant publishing, merging, production migration, deployment, or messaging permission.
 
 Read-only investigation and preparation of the task/plan may happen before approval. Review-only requests stay review-only and do not start implementation or require a new plan approval. Small changes can use a few sentences for the plan and review reports; keep the same gates.
 
-## Reusable stage commands
+## Commands
 
-These project-local skills are reusable prompt commands. Supply an incomplete task path after the command, for example `$ec-plan tasks/005-correct-system-design-documentation.md`. Subsequent commands may omit the path when the active task is unambiguous.
+Natural-language requests that ask to change or implement the project use automatic delivery. Explanation, investigation, diagnosis, status, review-only, and test-only requests retain their requested boundary. `$ecommerce-delivery` explicitly selects automatic delivery and resumes from the first unmet applicable gate.
+
+The following stage commands are optional advanced controls:
 
 | Command | Work performed | Stop boundary |
 | --- | --- | --- |
@@ -23,19 +27,18 @@ These project-local skills are reusable prompt commands. Supply an incomplete ta
 | `$ec-review` | Spawn independent architect and security reviewers in parallel on the existing artifacts, including fixes from an earlier review. | Report verdicts and findings; do not fix code or run the final test suite. |
 | `$ec-fix` | Fix supported findings within the approved plan and run relevant regression tests. | Report fixes and checks; leave findings awaiting reviewer confirmation and do not start re-review or final verification. |
 | `$ec-test` | Run applicable final verification and report actual evidence. | Report results; do not fix implementation, tests, or configuration and do not start reviews. |
-| `$ecommerce-delivery` | Explicitly select automatic delivery and resume from the first unmet applicable gate. | Continue through approved implementation, reviews, fixes, and verification until complete or blocked. |
 
 ### Shared command rules
 
-An `ec-*` command selects stage-only execution for the resolved task. Record the execution mode, last command, completed stage, pending gates, and next suggested command in that task's delivery record. Merely loading a skill, approving a plan, or saying `continue` does not switch stage-only execution to automatic delivery. An explicit `$ecommerce-delivery` invocation or an explicit user request for automatic delivery changes the mode for that task. Other tasks retain their own modes; automatic delivery remains the default for tasks without a selection.
+An explicit `ec-*` command selects stage-only execution for the current turn and stops at the stated boundary. Record the last command, completed stage, pending gates, and next suggested command in the task's delivery record. Plain language such as `continue` after an approved plan returns to automatic delivery unless the user asks for a specific stage or stop boundary.
 
-Resolve the task from an explicit path first, then the unambiguous active task in the conversation, then a single task explicitly recorded as active. Do not select the first unfinished roadmap item or use modification time as authorization. If the task is missing or ambiguous, ask for its path before dependent actions. A new outcome provided with `$ec-plan` may create a task from `tasks/TEMPLATE.md`; other commands do not invent a task or plan. If several stage commands are supplied without a clear sequence/stop instruction, clarify the intended stage rather than silently chaining them.
+Resolve the task from an explicit path first, then an unambiguous task in the conversation, then a single task explicitly recorded as active. For a clear new outcome, create the next numbered task from `tasks/TEMPLATE.md` with a descriptive filename. Do not ask the user to choose a routine number or path. Ask only when task identity is materially ambiguous, and never select an unfinished roadmap item or use modification time as authorization. If several stage commands are supplied without a clear sequence or stop instruction, clarify the intended stage rather than silently chaining them.
 
 `$ec-build` and `$ec-fix` require actual user approval of the applicable plan revision. Their names alone do not approve an unapproved plan. Reuse approval established in the conversation; if a new session cannot establish it from available conversation evidence, ask the user to confirm the specific recorded plan before edits. Plan revisions that materially change scope require approval of the revision. Plan, review, and test commands may inspect existing work without implementation approval; they do not grant permission to change it.
 
 Stage commands may read supporting files and update the active task's evidence record. `$ec-plan` may edit the task/plan document only. `$ec-review` keeps implementation artifacts stable; only the parent writes the task report after both read-only reviewers return. `$ec-test` may create ordinary test outputs and use disposable local test dependencies where already authorized, but must report missing tooling/dependencies rather than implementing bootstrap or repairing configuration. No command authorizes production data changes or external publishing.
 
-At each stop, distinguish stage completion from overall task completion and list unmet gates. A failed test remains failed; a fix remains awaiting re-review until the affected reviewer inspects it. Reuse review/test evidence only when it still covers the current artifacts. Never mark the task complete until all applicable acceptance, review, and verification gates pass. If `continue` is ambiguous at a stage boundary, ask which command to run.
+At each stop, distinguish stage completion from overall task completion and list unmet gates. A failed test remains failed; a fix remains awaiting re-review until the affected reviewer inspects it. Reuse review/test evidence only when it still covers the current artifacts. Never mark the task complete until all applicable acceptance, review, and verification gates pass.
 
 To plan again after implementation, `$ec-plan` revises the task's plan and stops; it does not discard existing edits or prior evidence. Identify which approval, reviews, or tests the revision invalidates. `$ec-review` may review existing unapproved work but must report the missing approved plan as a limit, not fabricate approval or require implementation to start. `$ec-fix` with no actionable in-scope findings reports that fact and stops. `$ec-test` with outstanding reviews or findings still reports useful test results and leaves those gates pending.
 
@@ -43,7 +46,7 @@ To plan again after implementation, `$ec-plan` revises the task's plan and stops
 
 Read `AGENTS.md`, the active task, relevant `docs/`, and existing code patterns. Inspect the working tree and identify pre-existing changes. If Git is unavailable, record the initial affected files and compare their content explicitly; never invent a base commit.
 
-Ask focused questions only about material gaps that inspection cannot resolve. State reasonable low-impact assumptions. For new tasks, use `tasks/TEMPLATE.md`; keep the delivery record in the active task instead of creating a report per phase.
+Ask focused questions only about material gaps that inspection cannot resolve. State reasonable low-impact assumptions. For clear new work, create the next numbered task from `tasks/TEMPLATE.md` automatically; keep the delivery record there instead of creating a report per phase. An explicit user-provided task path takes precedence.
 
 Present the observable outcome, scope exclusions, affected modules, proposed technical solution, new dependencies with reasons, and ordered implementation steps. Identify applicable tenant, commerce, compatibility, migration, and failure/retry concerns. Map acceptance criteria to tests and name the verification commands. Surface unresolved decisions before asking for plan approval.
 
@@ -83,7 +86,7 @@ Continue while making progress. If a required external prerequisite is unavailab
 
 Use `docs/testing-strategy.md`. Tenant resources require cross-store denial tests. Transaction, uniqueness, and concurrency claims require real PostgreSQL integration tests. Select the relevant money, inventory, order snapshot, payment/webhook, and event retry cases from that strategy; do not implement future modules merely to add tests.
 
-For backend changes, run `make fmt-check`, `make lint`, `make test`, `make test-integration`, and `make vulncheck`, or `make verify` once it runs all five and propagates failures. Record the exact commands, results, and environment limits. Rerun affected checks after any code fix and ensure the final implementation is covered by both reviews. Do not repeat a successful full suite without a change or unresolved concern.
+For backend changes, run formatting, linting, and focused tests for the affected packages or modules. Add real integration tests when persistence, Redis, migrations, or concurrency behavior changes. Add `make vulncheck` for dependency, authentication, cryptography, security-sensitive, and release changes. Run `make verify` for broad cross-module changes and release candidates. Record exact commands, results, and environment limits. Rerun affected checks after code fixes; do not repeat unrelated expensive checks.
 
 For documentation/workflow-only changes, inspect changed instructions and local links and parse changed configuration with an available format-specific tool. Validate changed GitHub Actions YAML with a YAML parser or actionlint when available. No project-specific workflow validation script is required. Report unavailable required validation as unverified.
 
@@ -97,7 +100,7 @@ Passing a development task establishes evidence for that slice. Production relea
 
 The reusable skill is `.agents/skills/ecommerce-delivery/SKILL.md`. The project `.codex/config.toml` enables agents and limits concurrent reviewer threads to two. Reviewers inherit the selected parent model and reasoning effort. Global configuration is unchanged.
 
-Start Codex in this project and invoke `$ecommerce-delivery`, or ask it to implement an active task using the project workflow. If the skill does not appear, restart the session. Project `.codex/` settings require a trusted project and a runtime supporting custom agents; the explicit-instructions fallback above covers runtimes that only expose generic agent spawning.
+Start Codex in this project and describe the desired change. Invoke `$ecommerce-delivery` only when you want to select automatic delivery explicitly. If the skill does not appear, restart the session. Project `.codex/` settings require a trusted project and a runtime supporting custom agents; the explicit-instructions fallback above covers runtimes that only expose generic agent spawning.
 
 GitHub Actions is the assumed CI provider. `.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatch. Its `Backend verification` job requires bootstrap artifacts, installs Go from `go.mod`, installs pinned tools through `make tools`, runs the five verification targets, and starts/stops disposable dependencies around integration tests.
 

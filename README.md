@@ -124,16 +124,12 @@ On native Windows, race-enabled Go tests may be unavailable; use CI or WSL for r
 
 ## Delivery workflow
 
-Work is tracked as one approved task through planning, implementation, independent architecture/security reviews, fixes, and final verification. Completed records are retained under [`tasks/archive`](tasks/archive/); incomplete work remains at the task root.
+Describe the outcome you want in normal language. Codex resolves or creates the task record, investigates the codebase, presents one implementation plan, and waits for one approval.
 
-Use the stage command appropriate to the next gate, for example:
+After approval, say `continue`. Codex carries the task through implementation, independent architecture and security reviews, required fixes, and final verification.
 
 ```text
-$ec-plan tasks/<task>.md
-$ec-build tasks/<task>.md
-$ec-review tasks/<task>.md
-$ec-fix tasks/<task>.md
-$ec-test tasks/<task>.md
+Describe work -> approve plan -> continue -> completion report
 ```
 
-Use `$ecommerce-delivery` only when automatic progression through all approved stages is intended. See the [development workflow](docs/development-workflow.md) for authoritative rules.
+`$ecommerce-delivery` explicitly selects the same automatic behavior. The stage commands `$ec-plan`, `$ec-build`, `$ec-review`, `$ec-fix`, and `$ec-test` remain available as advanced controls. You normally do not need to choose a task path or workflow command. See the [development workflow](docs/development-workflow.md) for authoritative rules and [`tasks/`](tasks/) for delivery records.

@@ -16,9 +16,10 @@ Build a maintainable multi-store e-commerce backend. Optimize for correctness, t
 ## Project delivery workflow
 
 - Follow `docs/development-workflow.md` for implementation tasks in this project.
-- Clarify material requirements, then present one plan including the technical solution and verification strategy. Wait for the user's plan approval before implementation unless that plan is already approved in the conversation.
-- In automatic delivery, continue through implementation, reviews, fixes, and testing after approval without requesting approval at each stage.
-- The project skills `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test` select one stage and stop at its boundary. Preserve stage-only execution for that task until the user explicitly selects automatic delivery; approving a plan alone does not change the mode.
+- Use the normal workflow: clarify material requirements, present one plan, wait for one approval, then automatically implement, review, fix, and test.
+- Resolve or create the task record automatically when the request is clear. Do not ask the user to choose routine task numbers, paths, or workflow stages.
+- After plan approval, plain language such as `continue` resumes automatic delivery unless the user explicitly requests a narrower stage or asks to stop.
+- The project skills `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test` remain optional advanced controls that run one stage and stop at its boundary.
 - Spawn separate architect and security reviewer agents in parallel during the review stage, automatically after implementation only in automatic delivery. Use the project reviewer definitions under `.codex/agents/`, or pass their instructions explicitly when custom agent selection is unavailable.
 - Reviewers report findings only; they must not edit files, spawn agents, or restart the delivery workflow. The implementing agent owns fixes and final verification.
 - Unresolved blocking findings or failed/unavailable required checks prevent declaring the implementation complete.
@@ -79,15 +80,13 @@ Build a maintainable multi-store e-commerce backend. Optimize for correctness, t
 
 ## Verification
 
-Before declaring completion, run the most relevant commands, preferably:
+Before declaring completion, select checks by risk according to `docs/testing-strategy.md`:
 
-```bash
-make fmt-check
-make lint
-make test
-make test-integration
-make vulncheck
-```
+- Documentation-only changes require diff, local-link, and changed-configuration validation.
+- Backend changes require formatting, linting, and focused tests for affected behavior.
+- Run integration tests only when persistence, Redis, migrations, or concurrency behavior is affected.
+- Run vulnerability checks for dependency, authentication, cryptography, security-sensitive, and release changes.
+- Run `make verify` for broad cross-module changes and release candidates.
 
 If a command cannot be run, report exactly which command and why. Do not claim tests passed unless they were executed successfully.
 

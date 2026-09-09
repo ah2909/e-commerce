@@ -5,7 +5,7 @@ description: "Run independent architect and security reviews of an e-commerce ta
 
 # ec-review
 
-Read [the project workflow](../../../docs/development-workflow.md), especially Reusable stage commands and section 3. Resolve the active task and select stage-only execution using the shared rules.
+Read [the project workflow](../../../docs/development-workflow.md), especially Commands and section 3. Resolve the active task and select stage-only execution for this turn using the shared rules.
 
 Spawn separate architect and security reviewer agents in parallel using the project role definitions or the documented generic-agent fallback. Keep implementation artifacts stable. Review actual files and current evidence, including fixes awaiting re-review. Reviewing existing work does not require approving its implementation plan; disclose missing plan evidence as a limit.
 

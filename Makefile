@@ -2,6 +2,8 @@ GOLANGCI_LINT_VERSION := v2.13.2
 GOVULNCHECK_VERSION := v1.7.0
 TOOLS_DIR := $(CURDIR)/.tools/$(GOLANGCI_LINT_VERSION)-$(GOVULNCHECK_VERSION)/bin
 export GOBIN := $(TOOLS_DIR)
+.DEFAULT_GOAL := check
+
 COMPOSE_PROJECT_NAME ?= ecommerce-dev
 APP_ENV ?= development
 HTTP_ADDRESS ?= :8080
@@ -34,7 +36,9 @@ endif
 GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint$(EXE)
 GOVULNCHECK := $(TOOLS_DIR)/govulncheck$(EXE)
 
-.PHONY: tools fmt fmt-check lint test test-integration vulncheck verify dev-deps dev-deps-down run-api run-worker migrate-up migrate-status migrate-test-up migrate-test-status migrate-test-reset benchmark-store-context
+.PHONY: check tools fmt fmt-check lint test test-integration vulncheck verify dev-deps dev-deps-down run-api run-worker migrate-up migrate-status migrate-test-up
+
+check: fmt-check lint test
 
 tools: $(GOLANGCI_LINT) $(GOVULNCHECK)
 
@@ -44,13 +48,11 @@ $(GOLANGCI_LINT):
 $(GOVULNCHECK):
 	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-fmt: $(GOLANGCI_LINT)
+fmt:
 	gofmt -w .
-	$(GOLANGCI_LINT) fmt
 
-fmt-check: $(GOLANGCI_LINT)
+fmt-check:
 	$(FMT_CHECK)
-	$(GOLANGCI_LINT) fmt --diff
 
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run
@@ -64,7 +66,7 @@ test-integration: migrate-test-up
 vulncheck: $(GOVULNCHECK)
 	$(GOVULNCHECK) ./...
 
-verify: tools fmt-check lint test test-integration vulncheck
+verify: check test-integration vulncheck
 
 dev-deps:
 	docker compose up -d --wait --wait-timeout 90
@@ -86,13 +88,3 @@ migrate-status:
 
 migrate-test-up:
 	go run ./cmd/migrate test-up
-
-migrate-test-status:
-	go run ./cmd/migrate test-status
-
-migrate-test-reset:
-	go run ./cmd/migrate test-reset
-
-benchmark-store-context: migrate-test-up
-	go test -run=^$$ -bench=BenchmarkMiddlewareResolved -benchmem -benchtime=1s ./internal/platform/tenant
-	go test -tags=integration -run=^$$ -bench=BenchmarkResolveTenantPostgres -benchmem -benchtime=1s ./internal/stores/infrastructure/postgres

@@ -5,7 +5,7 @@ description: "Implement an approved e-commerce task plan with focused tests, the
 
 # ec-build
 
-Read [the project workflow](../../../docs/development-workflow.md), especially Reusable stage commands and section 2. Resolve the active task and select stage-only execution using the shared rules.
+Read [the project workflow](../../../docs/development-workflow.md), especially Commands and section 2. Resolve the active task and select stage-only execution for this turn using the shared rules.
 
 Establish actual user approval of the applicable plan before edits; invoking this command alone does not approve a plan. Implement that plan with its tests, contracts, and focused development checks. Preserve unrelated edits.
 

@@ -28,4 +28,9 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 ## Starting work
 
-Create a task from [TEMPLATE.md](TEMPLATE.md), clarify material requirements, and obtain approval for its plan before implementation. Do not select an unfinished roadmap item merely because it is next numerically.
+1. Describe the desired outcome in normal language.
+2. Codex resolves an existing task or creates the next numbered task from [TEMPLATE.md](TEMPLATE.md).
+3. Review and approve the implementation plan once.
+4. Say `continue` to run implementation, reviews, fixes, and verification automatically.
+
+Specify a task path only when you need to override the task inferred from the conversation. Codex must not select an unfinished roadmap item merely because it is next numerically.
