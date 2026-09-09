@@ -27,12 +27,12 @@ func main() {
 
 func run(arguments []string, lookup func(string) (string, bool)) error {
 	if len(arguments) != 1 {
-		return errors.New("usage: migrate up|status|test-up|test-status")
+		return errors.New("usage: migrate up|status|test-up|test-status|test-reset")
 	}
 	command := arguments[0]
 	databaseVariable := "DATABASE_URL"
 	var testConfig *pgx.ConnConfig
-	if command == "test-up" || command == "test-status" {
+	if command == "test-up" || command == "test-status" || command == "test-reset" {
 		databaseVariable = "TEST_DATABASE_URL"
 		var err error
 		testConfig, err = databaseguard.Parse(value(lookup, databaseVariable), value(lookup, "ALLOW_TEST_DATABASE_MUTATION"))
@@ -41,8 +41,8 @@ func run(arguments []string, lookup func(string) (string, bool)) error {
 		}
 		command = strings.TrimPrefix(command, "test-")
 	}
-	if command != "up" && command != "status" {
-		return errors.New("usage: migrate up|status|test-up|test-status")
+	if command != "up" && command != "status" && command != "reset" {
+		return errors.New("usage: migrate up|status|test-up|test-status|test-reset")
 	}
 	databaseURL, ok := lookup(databaseVariable)
 	if !ok || databaseURL == "" {
@@ -69,6 +69,10 @@ func run(arguments []string, lookup func(string) (string, bool)) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	switch command {
+	case "reset":
+		if _, err := database.ExecContext(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+			return fmt.Errorf("reset test database schema: %w", err)
+		}
 	case "up":
 		var locked bool
 		if err := database.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(7392152401)`).Scan(&locked); err != nil {

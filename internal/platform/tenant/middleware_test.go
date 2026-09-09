@@ -15,6 +15,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/authn"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/problem"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 )
@@ -29,11 +30,11 @@ type resolverStub struct {
 	err      error
 	wait     bool
 	calls    int
-	storeID  domain.StoreID
-	userID   domain.UserID
+	storeID  ids.StoreID
+	userID   ids.UserID
 }
 
-func (resolver *resolverStub) Execute(ctx context.Context, storeID domain.StoreID, userID domain.UserID) (application.TenantContext, error) {
+func (resolver *resolverStub) Execute(ctx context.Context, storeID ids.StoreID, userID ids.UserID) (application.TenantContext, error) {
 	resolver.calls++
 	resolver.storeID = storeID
 	resolver.userID = userID
@@ -60,8 +61,8 @@ func TestMiddlewareInjectsResolvedTenant(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	storeID, _ := domain.ParseStoreID(testStoreID)
-	userID, _ := domain.ParseUserID(testUserID)
+	storeID, _ := ids.ParseStoreID(testStoreID)
+	userID, _ := ids.ParseUserID(testUserID)
 	if response.Code != http.StatusNoContent || resolver.calls != 1 || resolver.storeID != storeID || resolver.userID != userID {
 		t.Fatalf("response = %d, calls = %d, scope = %s/%s", response.Code, resolver.calls, resolver.storeID, resolver.userID)
 	}
@@ -103,6 +104,21 @@ func TestMiddlewareFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMiddlewareRejectsGuestPrincipalBeforeTenantResolution(t *testing.T) {
+	resolver := &resolverStub{}
+	handler := middlewareHandler(resolver, &bytes.Buffer{}, time.Second, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler called")
+	}))
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/stores/"+testStoreID, nil)
+	request.SetPathValue("store_id", testStoreID)
+	request = request.WithContext(authn.WithPrincipal(request.Context(), authn.NewGuestPrincipal(testStoreID, "guest", "session")))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || resolver.calls != 0 {
+		t.Fatalf("response = %d, resolver calls = %d", response.Code, resolver.calls)
+	}
+}
+
 func TestMiddlewareBoundsResolution(t *testing.T) {
 	resolver := &resolverStub{wait: true}
 	var logs bytes.Buffer
@@ -136,17 +152,20 @@ func middlewareHandler(resolver Resolver, logs *bytes.Buffer, timeout time.Durat
 }
 
 func authenticatedRequest(userID, storeID string) *http.Request {
-	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/probe", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/store", nil)
 	request.Header.Set("X-Request-ID", "request-123")
-	return request.WithContext(authn.WithPrincipal(request.Context(), authn.NewPrincipal(userID, storeID)))
+	parsedStoreID, _ := ids.ParseStoreID(storeID)
+	subdomain, _ := domain.ParseSubdomain("shop")
+	ctx := context.WithValue(request.Context(), storeContextKey{}, application.StoreRecord{StoreID: parsedStoreID, Subdomain: subdomain, Status: domain.StoreStatusActive})
+	return request.WithContext(authn.WithPrincipal(ctx, authn.NewUserPrincipal(storeID, userID, "session")))
 }
 
 func resolvedContext(tb testing.TB) application.TenantContext {
 	tb.Helper()
-	storeID, _ := domain.ParseStoreID(testStoreID)
-	userID, _ := domain.ParseUserID(testUserID)
+	storeID, _ := ids.ParseStoreID(testStoreID)
+	userID, _ := ids.ParseUserID(testUserID)
 	now := time.Now()
-	store, _ := domain.NewStore(storeID, "Cửa hàng", "VND", "vi-VN", "Asia/Ho_Chi_Minh", now)
+	store, _ := domain.NewStore(storeID, "shop", "Cửa hàng", "VND", "vi-VN", "Asia/Ho_Chi_Minh", now)
 	membership, _ := domain.NewMembership(storeID, userID, now)
 	repository := &resolvedRepository{store: store, membership: membership}
 	resolved, err := application.NewResolveTenant(repository).Execute(context.Background(), storeID, userID)
@@ -161,17 +180,18 @@ type resolvedRepository struct {
 	membership domain.Membership
 }
 
-func (*resolvedRepository) CreateWithMembership(context.Context, domain.Store, domain.Membership) error {
+func (*resolvedRepository) CreateWithMembershipAndAudit(context.Context, domain.Store, domain.Membership, string) error {
 	return nil
 }
 
-func (repository *resolvedRepository) ResolveTenant(context.Context, domain.StoreID, domain.UserID) (application.TenantRecord, bool, error) {
+func (repository *resolvedRepository) ResolveTenant(context.Context, ids.StoreID, ids.UserID) (application.TenantRecord, bool, error) {
 	return application.TenantRecord{
 		StoreID:          repository.store.ID(),
 		UserID:           repository.membership.UserID(),
 		StoreName:        repository.store.Name(),
 		StoreStatus:      repository.store.Status(),
 		MembershipStatus: repository.membership.Status(),
+		Role:             repository.membership.Role(),
 		DefaultCurrency:  repository.store.DefaultCurrency(),
 		Locale:           repository.store.Locale(),
 		Timezone:         repository.store.Timezone(),

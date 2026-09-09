@@ -46,7 +46,7 @@ A new developer can start PostgreSQL, Redis, and Kafka locally, run the API, cal
 
 ## Prompt to give Codex
 
-Use `$ecommerce-delivery` for `tasks/001-bootstrap.md`. First inspect all referenced documents and clarify the Go module path and any material setup choices. Propose a concise plan including the technical solution, libraries, and verification strategy. After plan approval, implement only this task, run separate architect and security reviewer agents in parallel, fix findings, and complete verification automatically. Report exact results and any remaining assumptions.
+Historical invocation used before archival: `$ecommerce-delivery tasks/archive/001-bootstrap.md`. The task is now complete; do not restart it to authorize adjacent work.
 
 ## Delivery record
 

@@ -8,7 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ah2909/e-commerce/internal/stores/application"
+	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
+	identitypassword "github.com/ah2909/e-commerce/internal/identity/infrastructure/password"
+	identitypostgres "github.com/ah2909/e-commerce/internal/identity/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/identity/infrastructure/token"
+	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
+	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,7 +23,7 @@ import (
 
 type Store struct {
 	Store  domain.Store
-	UserID domain.UserID
+	UserID ids.UserID
 }
 
 type Pair struct {
@@ -28,14 +35,27 @@ func NewPair(tb testing.TB, pool *pgxpool.Pool) Pair {
 	tb.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	tb.Cleanup(cancel)
-	repository := storepostgres.NewRepository(pool)
 	now := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
-	var created []Store
-	tb.Cleanup(func() {
-		cleanupStores(tb, pool, created)
-	})
+	stores := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	identity := identitypostgres.NewRepository(pool)
+	hasher, err := identitypassword.NewArgon2ID(1)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	identityService := identityapplication.NewService(identity, hasher, stores, token.Generator{}, identityapplication.DefaultSessionSettings(), func() time.Time { return now })
+	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, stores, identity), identityService, ids.NewStoreID, func() time.Time { return now })
+	created := make([]Store, 0, 2)
+	tb.Cleanup(func() { cleanupStores(tb, pool, created) })
 	pair, fixtures, err := buildPair(func() (Store, error) {
-		return createStore(ctx, repository, "Cửa hàng Ánh Dương", now)
+		suffix, err := ids.NewStoreID()
+		if err != nil {
+			return Store{}, err
+		}
+		result, err := onboarding.Execute(ctx, onboardingapplication.Command{Subdomain: "fixture-" + suffix.String(), StoreName: "Cửa hàng Ánh Dương", Email: "fixture@example.com", Password: "fixture-password-value", PlatformActorID: "deployment", RequestID: "store-fixture"})
+		if err != nil {
+			return Store{}, fmt.Errorf("create fixture store: %w", err)
+		}
+		return Store{Store: result.Store, UserID: result.OwnerUserID}, nil
 	})
 	created = fixtures
 	if err != nil {
@@ -59,33 +79,21 @@ func buildPair(create func() (Store, error)) (Pair, []Store, error) {
 	return Pair{A: a, B: b}, created, nil
 }
 
-func createStore(ctx context.Context, repository application.Repository, name string, now time.Time) (Store, error) {
-	storeID, err := domain.NewStoreID()
-	if err != nil {
-		return Store{}, fmt.Errorf("generate store ID: %w", err)
-	}
-	userID, err := domain.NewUserID()
-	if err != nil {
-		return Store{}, fmt.Errorf("generate user ID: %w", err)
-	}
-	useCase := application.NewCreateStore(repository, func() (domain.StoreID, error) { return storeID, nil }, func() time.Time { return now })
-	store, err := useCase.Execute(ctx, application.CreateStoreCommand{CreatorID: userID, Name: name})
-	if err != nil {
-		return Store{}, fmt.Errorf("create fixture store: %w", err)
-	}
-	return Store{Store: store, UserID: userID}, nil
-}
-
 func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 	tb.Helper()
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cleanupCancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	for _, fixture := range created {
-		if _, err := pool.Exec(cleanupCtx, `DELETE FROM store_memberships WHERE store_id = $1::uuid`, fixture.Store.ID().String()); err != nil {
-			tb.Errorf("delete fixture memberships: %v", err)
-		}
-		if _, err := pool.Exec(cleanupCtx, `DELETE FROM stores WHERE store_id = $1::uuid`, fixture.Store.ID().String()); err != nil {
-			tb.Errorf("delete fixture store: %v", err)
+		storeID := fixture.Store.ID().String()
+		for _, statement := range []string{
+			`DELETE FROM audit_records WHERE store_id = $1::uuid`,
+			`DELETE FROM store_memberships WHERE store_id = $1::uuid`,
+			`DELETE FROM users WHERE store_id = $1::uuid`,
+			`DELETE FROM stores WHERE store_id = $1::uuid`,
+		} {
+			if _, err := pool.Exec(ctx, statement, storeID); err != nil {
+				tb.Errorf("clean fixture store: %v", err)
+			}
 		}
 	}
 }

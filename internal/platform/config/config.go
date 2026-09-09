@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -18,21 +20,68 @@ const (
 	defaultShutdownTimeout         = 10 * time.Second
 	defaultDependencyTimeout       = 2 * time.Second
 	defaultTenantResolutionTimeout = 500 * time.Millisecond
+	defaultPasswordHashConcurrency = 2
+	defaultFacebookGraphVersion    = "v23.0"
+	defaultAccessTokenTTL          = 15 * time.Minute
+	defaultSessionTTL              = 30 * 24 * time.Hour
+	defaultSocialTransactionTTL    = 10 * time.Minute
+	defaultSocialExchangeTTL       = time.Minute
+	defaultTenantBaseDomain        = "example.test"
+	defaultAuthHost                = "auth.example.test"
 	maxShutdownTimeout             = 2 * time.Minute
 	maxDependencyTimeout           = 30 * time.Second
 	maxTenantResolutionTimeout     = 5 * time.Second
+	maxAccessTokenTTL              = time.Hour
+	maxSessionTTL                  = 90 * 24 * time.Hour
+	maxSocialTransactionTTL        = 30 * time.Minute
+	maxSocialExchangeTTL           = 5 * time.Minute
+	maxRateWindow                  = 24 * time.Hour
 )
 
+type RateLimit struct {
+	Maximum int
+	Window  time.Duration
+}
+
+type CredentialRateLimit struct {
+	PeerMaximum     int
+	IdentityMaximum int
+	Window          time.Duration
+}
+
 type Config struct {
-	AppEnv                  string
-	HTTPAddress             string
-	LogLevel                slog.Level
-	DatabaseURL             string
-	RedisAddress            string
-	KafkaBrokers            []string
-	ShutdownTimeout         time.Duration
-	DependencyTimeout       time.Duration
-	TenantResolutionTimeout time.Duration
+	AppEnv                     string
+	HTTPAddress                string
+	LogLevel                   slog.Level
+	DatabaseURL                string
+	RedisAddress               string
+	KafkaBrokers               []string
+	ShutdownTimeout            time.Duration
+	DependencyTimeout          time.Duration
+	TenantResolutionTimeout    time.Duration
+	PasswordHashConcurrency    int
+	AccessTokenTTL             time.Duration
+	SessionTTL                 time.Duration
+	SocialTransactionTTL       time.Duration
+	SocialExchangeTTL          time.Duration
+	TenantBaseDomain           string
+	AuthHost                   string
+	PlatformAdminToken         [32]byte
+	TrustedProxyCIDRs          []netip.Prefix
+	RegistrationRateLimit      CredentialRateLimit
+	LoginRateLimit             CredentialRateLimit
+	TokenRateLimit             CredentialRateLimit
+	SocialRateLimit            CredentialRateLimit
+	GuestCreationRateLimit     RateLimit
+	PlatformProvisionRateLimit RateLimit
+	GoogleClientID             string
+	GoogleClientSecret         string
+	GoogleRedirectURL          string
+	FacebookAppID              string
+	FacebookAppSecret          string
+	FacebookRedirectURL        string
+	FacebookGraphVersion       string
+	SocialReturnPaths          []string
 }
 
 type LookupFunc func(string) (string, bool)
@@ -88,18 +137,176 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	passwordHashConcurrency, err := integer(lookup, "PASSWORD_HASH_CONCURRENCY", defaultPasswordHashConcurrency, 1, 32)
+	if err != nil {
+		return Config{}, err
+	}
+	accessTokenTTL, err := duration(lookup, "ACCESS_TOKEN_TTL", defaultAccessTokenTTL, maxAccessTokenTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	sessionTTL, err := duration(lookup, "SESSION_TTL", defaultSessionTTL, maxSessionTTL)
+	if err != nil || sessionTTL <= accessTokenTTL {
+		return Config{}, fmt.Errorf("SESSION_TTL must be greater than ACCESS_TOKEN_TTL and at most %s", maxSessionTTL)
+	}
+	socialTransactionTTL, err := duration(lookup, "SOCIAL_TRANSACTION_TTL", defaultSocialTransactionTTL, maxSocialTransactionTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	socialExchangeTTL, err := duration(lookup, "SOCIAL_EXCHANGE_TTL", defaultSocialExchangeTTL, maxSocialExchangeTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	tenantBaseDomain := strings.ToLower(optional(lookup, "TENANT_BASE_DOMAIN", defaultTenantBaseDomain))
+	authHost := strings.ToLower(optional(lookup, "AUTH_HOST", defaultAuthHost))
+	if err := validateTenantHosts(tenantBaseDomain, authHost); err != nil {
+		return Config{}, err
+	}
+	platformAdminToken, err := platformToken(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	trustedProxyCIDRs, err := parseCIDRs(optionalEmpty(lookup, "TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return Config{}, err
+	}
+	registrationRate, err := credentialRateLimit(lookup, "REGISTRATION", 10, 5, time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	loginRate, err := credentialRateLimit(lookup, "LOGIN", 20, 5, 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	tokenRate, err := credentialRateLimit(lookup, "TOKEN", 30, 10, time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	socialRate, err := credentialRateLimit(lookup, "SOCIAL", 20, 10, time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	guestCreationRate, err := rateLimit(lookup, "GUEST_CREATION", 20, time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	platformProvisionRate, err := rateLimit(lookup, "PLATFORM_PROVISION", 10, time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	googleClientID := optionalEmpty(lookup, "GOOGLE_CLIENT_ID")
+	googleClientSecret := optionalEmpty(lookup, "GOOGLE_CLIENT_SECRET")
+	googleRedirectURL := optionalEmpty(lookup, "GOOGLE_REDIRECT_URL")
+	if err := validateProvider("GOOGLE", googleClientID, googleClientSecret, googleRedirectURL, authHost, "/api/v1/auth/social/google/callback"); err != nil {
+		return Config{}, err
+	}
+	facebookAppID := optionalEmpty(lookup, "FACEBOOK_APP_ID")
+	facebookAppSecret := optionalEmpty(lookup, "FACEBOOK_APP_SECRET")
+	facebookRedirectURL := optionalEmpty(lookup, "FACEBOOK_REDIRECT_URL")
+	if err := validateProvider("FACEBOOK", facebookAppID, facebookAppSecret, facebookRedirectURL, authHost, "/api/v1/auth/social/facebook/callback"); err != nil {
+		return Config{}, err
+	}
+	returnPaths, err := parseReturnPaths(optional(lookup, "SOCIAL_RETURN_PATHS", "/auth/social/complete"))
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		AppEnv:                  appEnv,
-		HTTPAddress:             httpAddress,
-		LogLevel:                logLevel,
-		DatabaseURL:             databaseURL,
-		RedisAddress:            redisAddress,
-		KafkaBrokers:            kafkaBrokers,
-		ShutdownTimeout:         shutdownTimeout,
-		DependencyTimeout:       dependencyTimeout,
-		TenantResolutionTimeout: tenantResolutionTimeout,
+		AppEnv:                     appEnv,
+		HTTPAddress:                httpAddress,
+		LogLevel:                   logLevel,
+		DatabaseURL:                databaseURL,
+		RedisAddress:               redisAddress,
+		KafkaBrokers:               kafkaBrokers,
+		ShutdownTimeout:            shutdownTimeout,
+		DependencyTimeout:          dependencyTimeout,
+		TenantResolutionTimeout:    tenantResolutionTimeout,
+		PasswordHashConcurrency:    passwordHashConcurrency,
+		AccessTokenTTL:             accessTokenTTL,
+		SessionTTL:                 sessionTTL,
+		SocialTransactionTTL:       socialTransactionTTL,
+		SocialExchangeTTL:          socialExchangeTTL,
+		TenantBaseDomain:           tenantBaseDomain,
+		AuthHost:                   authHost,
+		PlatformAdminToken:         platformAdminToken,
+		TrustedProxyCIDRs:          trustedProxyCIDRs,
+		RegistrationRateLimit:      registrationRate,
+		LoginRateLimit:             loginRate,
+		TokenRateLimit:             tokenRate,
+		SocialRateLimit:            socialRate,
+		GuestCreationRateLimit:     guestCreationRate,
+		PlatformProvisionRateLimit: platformProvisionRate,
+		GoogleClientID:             googleClientID,
+		GoogleClientSecret:         googleClientSecret,
+		GoogleRedirectURL:          googleRedirectURL,
+		FacebookAppID:              facebookAppID,
+		FacebookAppSecret:          facebookAppSecret,
+		FacebookRedirectURL:        facebookRedirectURL,
+		FacebookGraphVersion:       optional(lookup, "FACEBOOK_GRAPH_VERSION", defaultFacebookGraphVersion),
+		SocialReturnPaths:          returnPaths,
 	}, nil
+}
+
+func validateTenantHosts(baseDomain, authHost string) error {
+	if !validHostname(baseDomain) || !validHostname(authHost) || authHost != "auth."+baseDomain {
+		return fmt.Errorf("AUTH_HOST must be auth.TENANT_BASE_DOMAIN and both must be valid hostnames")
+	}
+	return nil
+}
+
+func validHostname(value string) bool {
+	if value == "" || len(value) > 253 || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") || strings.Contains(value, ":") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, character := range label {
+			if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func redirectMatches(value, expectedHost, expectedPath string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "https" && strings.EqualFold(parsed.Hostname(), expectedHost) && parsed.Port() == "" && parsed.User == nil && parsed.EscapedPath() == expectedPath && parsed.RawQuery == "" && parsed.Fragment == ""
+}
+
+func rateLimit(lookup LookupFunc, prefix string, defaultMaximum int, defaultWindow time.Duration) (RateLimit, error) {
+	maximum, err := integer(lookup, prefix+"_RATE_MAXIMUM", defaultMaximum, 1, 10000)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	window, err := duration(lookup, prefix+"_RATE_WINDOW", defaultWindow, maxRateWindow)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	return RateLimit{Maximum: maximum, Window: window}, nil
+}
+
+func credentialRateLimit(lookup LookupFunc, prefix string, defaultPeer, defaultIdentity int, defaultWindow time.Duration) (CredentialRateLimit, error) {
+	peer, err := integer(lookup, prefix+"_RATE_PEER_MAXIMUM", defaultPeer, 1, 10000)
+	if err != nil {
+		return CredentialRateLimit{}, err
+	}
+	identity, err := integer(lookup, prefix+"_RATE_IDENTITY_MAXIMUM", defaultIdentity, 1, 10000)
+	if err != nil {
+		return CredentialRateLimit{}, err
+	}
+	window, err := duration(lookup, prefix+"_RATE_WINDOW", defaultWindow, maxRateWindow)
+	if err != nil {
+		return CredentialRateLimit{}, err
+	}
+	return CredentialRateLimit{PeerMaximum: peer, IdentityMaximum: identity, Window: window}, nil
+}
+
+func optionalEmpty(lookup LookupFunc, key string) string {
+	value, _ := lookup(key)
+	return strings.TrimSpace(value)
 }
 
 func optional(lookup LookupFunc, key, fallback string) string {
@@ -125,6 +332,71 @@ func duration(lookup LookupFunc, key string, fallback, maximum time.Duration) (t
 		return 0, fmt.Errorf("%s must be greater than zero and at most %s", key, maximum)
 	}
 	return value, nil
+}
+
+func integer(lookup LookupFunc, key string, fallback, minimum, maximum int) (int, error) {
+	text := optional(lookup, key, strconv.Itoa(fallback))
+	value, err := strconv.Atoi(text)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, minimum, maximum)
+	}
+	return value, nil
+}
+
+func validateProvider(prefix, clientID, secret, redirectURL, authHost, callbackPath string) error {
+	configured := clientID != "" || secret != "" || redirectURL != ""
+	if !configured {
+		return nil
+	}
+	if clientID == "" || secret == "" || !redirectMatches(redirectURL, authHost, callbackPath) {
+		return fmt.Errorf("%s social login configuration must be complete and use its exact AUTH_HOST callback URL", prefix)
+	}
+	return nil
+}
+
+func platformToken(lookup LookupFunc) ([32]byte, error) {
+	value, err := required(lookup, "PLATFORM_ADMIN_TOKEN")
+	if err != nil {
+		return [32]byte{}, err
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return [32]byte{}, fmt.Errorf("PLATFORM_ADMIN_TOKEN must be unpadded base64url encoding exactly 32 bytes")
+	}
+	return [32]byte(decoded), nil
+}
+
+func parseCIDRs(value string) ([]netip.Prefix, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) > 32 {
+		return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS must contain at most 32 prefixes")
+	}
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS contains an invalid prefix")
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
+func parseReturnPaths(value string) ([]string, error) {
+	parts := strings.Split(value, ",")
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		path := strings.TrimSpace(part)
+		parsed, err := url.Parse(path)
+		if err != nil || path == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("SOCIAL_RETURN_PATHS must contain only absolute-path references")
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }
 
 func validateDatabaseURL(value string) error {

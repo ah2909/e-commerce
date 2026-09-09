@@ -6,13 +6,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
+	identitypassword "github.com/ah2909/e-commerce/internal/identity/infrastructure/password"
+	identitypostgres "github.com/ah2909/e-commerce/internal/identity/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/identity/infrastructure/token"
+	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
+	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
@@ -25,7 +35,7 @@ import (
 func TestRepositoryTenantIsolationAndVietnameseRoundTrip(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
-	repository := storepostgres.NewRepository(pool)
+	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -40,8 +50,8 @@ func TestRepositoryTenantIsolationAndVietnameseRoundTrip(t *testing.T) {
 		t.Fatalf("membership scope = %s/%s", record.StoreID, record.UserID)
 	}
 	for _, attempt := range []struct {
-		storeID domain.StoreID
-		userID  domain.UserID
+		storeID ids.StoreID
+		userID  ids.UserID
 	}{{pair.B.Store.ID(), pair.A.UserID}, {pair.A.Store.ID(), pair.B.UserID}} {
 		_, found, err := repository.ResolveTenant(ctx, attempt.storeID, attempt.userID)
 		if err != nil || found {
@@ -50,7 +60,7 @@ func TestRepositoryTenantIsolationAndVietnameseRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRepositoryAllowsOneUserInMultipleStores(t *testing.T) {
+func TestRepositoryRejectsCrossStoreUserMembership(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
 	now := time.Now().UTC()
@@ -59,51 +69,81 @@ func TestRepositoryAllowsOneUserInMultipleStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = pool.Exec(context.Background(), `
-		INSERT INTO store_memberships (store_id, user_id, status, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
-		membership.StoreID().String(), membership.UserID().String(), membership.Status(), membership.CreatedAt(), membership.UpdatedAt())
-	if err != nil {
-		t.Fatalf("insert second membership: %v", err)
-	}
-	_, found, err := storepostgres.NewRepository(pool).ResolveTenant(context.Background(), pair.B.Store.ID(), pair.A.UserID)
-	if err != nil || !found {
-		t.Fatalf("ResolveTenant(second membership) = found %v, error %v", found, err)
+		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
+		membership.StoreID().String(), membership.UserID().String(), membership.Status(), membership.Role(), membership.CreatedAt(), membership.UpdatedAt())
+	if err == nil {
+		t.Fatal("cross-store membership insert succeeded")
 	}
 }
 
-func TestRepositoryCreationRollsBackWhenMembershipInsertFails(t *testing.T) {
+func TestMembershipMutationsAreScopedAuditedAndKeepAnOwner(t *testing.T) {
 	pool := integrationPool(t, nil)
-	storeID, _ := domain.NewStoreID()
-	userID, _ := domain.ParseUserID("138f0f7d-7b3d-4d2e-8f4f-3b86f31f2741")
+	pair := storefixture.NewPair(t, pool)
+	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	ctx := context.Background()
 	now := time.Now().UTC()
-	store, _ := domain.NewStore(storeID, "Cửa hàng rollback", "VND", "vi-VN", "Asia/Ho_Chi_Minh", now)
-	membership, _ := domain.NewMembership(storeID, userID, now)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, _ = pool.Exec(ctx, `DROP TRIGGER IF EXISTS store_membership_rollback_test_trigger ON store_memberships`)
-	_, _ = pool.Exec(ctx, `DROP FUNCTION IF EXISTS store_membership_rollback_test()`)
-	_, err := pool.Exec(ctx, `
-		CREATE FUNCTION store_membership_rollback_test() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN
-			IF NEW.user_id = '138f0f7d-7b3d-4d2e-8f4f-3b86f31f2741'::uuid THEN RAISE EXCEPTION 'fixture rejection'; END IF;
-			RETURN NEW;
-		END $$;
-		CREATE TRIGGER store_membership_rollback_test_trigger BEFORE INSERT ON store_memberships FOR EACH ROW EXECUTE FUNCTION store_membership_rollback_test()`)
-	if err != nil {
-		t.Fatalf("create rejection trigger: %v", err)
-	}
+	secondOwnerID, _ := ids.NewUserID()
+	insertTenantUser(t, pool, pair.A.Store.ID(), secondOwnerID)
+	secondOwner, _ := domain.NewMembershipWithRole(pair.A.Store.ID(), secondOwnerID, domain.RoleOwner, now)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS store_membership_rollback_test_trigger ON store_memberships`)
-		_, _ = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS store_membership_rollback_test()`)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_records WHERE store_id=$1::uuid`, pair.A.Store.ID().String())
 	})
-
-	err = storepostgres.NewRepository(pool).CreateWithMembership(ctx, store, membership)
-	if err == nil {
-		t.Fatal("CreateWithMembership() error = nil")
+	if err := repository.CreateMembership(ctx, secondOwner, pair.A.UserID, "create-member-request"); err != nil {
+		t.Fatalf("CreateMembership() error = %v", err)
 	}
-	var count int
-	if queryErr := pool.QueryRow(ctx, `SELECT count(*) FROM stores WHERE store_id = $1::uuid`, storeID.String()).Scan(&count); queryErr != nil || count != 0 {
-		t.Fatalf("store count after rollback = %d, error %v", count, queryErr)
+	if _, err := repository.UpdateMembership(ctx, pair.A.Store.ID(), pair.A.UserID, domain.RoleStaff, domain.MembershipStatusInactive, pair.A.UserID, "demote-first-request", now.Add(time.Second)); err != nil {
+		t.Fatalf("UpdateMembership(first owner) error = %v", err)
+	}
+	if _, err := repository.UpdateMembership(ctx, pair.A.Store.ID(), secondOwnerID, domain.RoleStaff, domain.MembershipStatusInactive, secondOwnerID, "demote-last-request", now.Add(2*time.Second)); !errors.Is(err, application.ErrLastOwner) {
+		t.Fatalf("last-owner UpdateMembership() error = %v", err)
+	}
+	if err := repository.CreateMembership(ctx, secondOwner, pair.B.UserID, "cross-store-request"); !errors.Is(err, application.ErrTenantAccessDenied) {
+		t.Fatalf("cross-store actor error = %v", err)
+	}
+	var auditCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_records WHERE store_id=$1::uuid AND action LIKE 'membership.%' AND actor_type='user' AND actor_id=$2`, pair.A.Store.ID().String(), pair.A.UserID.String()).Scan(&auditCount); err != nil || auditCount != 2 {
+		t.Fatalf("audit count = %d, error %v", auditCount, err)
+	}
+}
+
+func TestConcurrentOwnerDemotionsPreserveAnActiveOwner(t *testing.T) {
+	pool := integrationPool(t, nil)
+	pair := storefixture.NewPair(t, pool)
+	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	now := time.Now().UTC()
+	secondOwnerID, _ := ids.NewUserID()
+	insertTenantUser(t, pool, pair.A.Store.ID(), secondOwnerID)
+	secondOwner, _ := domain.NewMembershipWithRole(pair.A.Store.ID(), secondOwnerID, domain.RoleOwner, now)
+	if err := repository.CreateMembership(context.Background(), secondOwner, pair.A.UserID, "concurrent-owner-create"); err != nil {
+		t.Fatalf("CreateMembership() error = %v", err)
+	}
+	start := make(chan struct{})
+	errorsByCall := make([]error, 2)
+	var wait sync.WaitGroup
+	targets := []ids.UserID{pair.A.UserID, secondOwnerID}
+	for index := range targets {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			_, errorsByCall[index] = repository.UpdateMembership(context.Background(), pair.A.Store.ID(), targets[index], domain.RoleStaff, domain.MembershipStatusInactive, targets[index], fmt.Sprintf("concurrent-owner-%d", index), now.Add(time.Second))
+		}(index)
+	}
+	close(start)
+	wait.Wait()
+	var successes int
+	for _, err := range errorsByCall {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful demotions = %d, errors = %v", successes, errorsByCall)
+	}
+	var activeOwners int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM store_memberships WHERE store_id=$1::uuid AND status='active' AND role='owner'`, pair.A.Store.ID().String()).Scan(&activeOwners); err != nil || activeOwners != 1 {
+		t.Fatalf("active owners = %d, error %v", activeOwners, err)
 	}
 }
 
@@ -111,17 +151,18 @@ func TestRepositoryDatabaseConstraints(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
 	assertExecRejected(t, pool, `
-		INSERT INTO store_memberships (store_id, user_id, status, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, 'owner', now(), now())`, pair.A.Store.ID().String(), pair.B.UserID.String())
-	missingStoreID, _ := domain.NewStoreID()
+		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, 'owner', 'staff', now(), now())`, pair.A.Store.ID().String(), pair.B.UserID.String())
+	missingStoreID, _ := ids.NewStoreID()
 	assertExecRejected(t, pool, `
-		INSERT INTO store_memberships (store_id, user_id, status, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, 'active', now(), now())`, missingStoreID.String(), pair.B.UserID.String())
+		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, 'active', 'staff', now(), now())`, missingStoreID.String(), pair.B.UserID.String())
 	assertExecRejected(t, pool, `
-		INSERT INTO store_memberships (store_id, user_id, status, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, 'active', now(), now())`, pair.A.Store.ID().String(), pair.A.UserID.String())
+		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, 'active', 'owner', now(), now())`, pair.A.Store.ID().String(), pair.A.UserID.String())
 	assertExecRejected(t, pool, `UPDATE stores SET status = 'deleted' WHERE store_id = $1::uuid`, pair.A.Store.ID().String())
 	assertExecRejected(t, pool, `UPDATE stores SET name = ' ' WHERE store_id = $1::uuid`, pair.A.Store.ID().String())
+	assertExecRejected(t, pool, `UPDATE stores SET subdomain = 'renamed-store' WHERE store_id = $1::uuid`, pair.A.Store.ID().String())
 	assertExecRejected(t, pool, `UPDATE stores SET settings_version = 0 WHERE store_id = $1::uuid`, pair.A.Store.ID().String())
 	assertExecRejected(t, pool, `UPDATE stores SET updated_at = created_at - interval '1 second' WHERE store_id = $1::uuid`, pair.A.Store.ID().String())
 	assertExecRejected(t, pool, `UPDATE store_memberships SET updated_at = created_at - interval '1 second' WHERE store_id = $1::uuid AND user_id = $2::uuid`, pair.A.Store.ID().String(), pair.A.UserID.String())
@@ -129,20 +170,25 @@ func TestRepositoryDatabaseConstraints(t *testing.T) {
 
 func TestRepositoryRoundTripsInternationalSettingsUnicodeAndUTC(t *testing.T) {
 	pool := integrationPool(t, nil)
-	repository := storepostgres.NewRepository(pool)
-	storeID, _ := domain.NewStoreID()
-	userID, _ := domain.NewUserID()
+	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	storeID, _ := ids.NewStoreID()
+	userID, _ := ids.NewUserID()
 	now := time.Date(2026, 9, 7, 20, 0, 0, 123456000, time.FixedZone("ICT", 7*60*60))
 	decomposedName := "Cửa hàng A\u0301nh Dương"
-	useCase := application.NewCreateStore(repository, func() (domain.StoreID, error) { return storeID, nil }, func() time.Time { return now })
-	store, err := useCase.Execute(context.Background(), application.CreateStoreCommand{
-		CreatorID: userID, Name: decomposedName, DefaultCurrency: "USD", Locale: "en-US", Timezone: "America/New_York",
-	})
+	identityRepository := identitypostgres.NewRepository(pool)
+	hasher, _ := identitypassword.NewArgon2ID(1)
+	identityService := identityapplication.NewService(identityRepository, hasher, repository, token.Generator{}, identityapplication.DefaultSessionSettings(), func() time.Time { return now })
+	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, repository, identityRepository), identityService, func() (ids.StoreID, error) { return storeID, nil }, func() time.Time { return now })
+	result, err := onboarding.Execute(context.Background(), onboardingapplication.Command{Subdomain: "international-store", StoreName: decomposedName, DefaultCurrency: "USD", Locale: "en-US", Timezone: "America/New_York", Email: "international@example.com", Password: "international-password", PlatformActorID: "deployment", RequestID: "international-store-test"})
 	if err != nil {
 		t.Fatalf("create international store: %v", err)
 	}
+	store := result.Store
+	userID = result.OwnerUserID
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_records WHERE store_id = $1::uuid`, storeID.String())
 		_, _ = pool.Exec(context.Background(), `DELETE FROM store_memberships WHERE store_id = $1::uuid`, storeID.String())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE store_id = $1::uuid`, storeID.String())
 		_, _ = pool.Exec(context.Background(), `DELETE FROM stores WHERE store_id = $1::uuid`, storeID.String())
 	})
 	var persistedName, currencyCode, locale, timezone string
@@ -168,15 +214,23 @@ func TestResolveTenantUsesOneIndexedQuery(t *testing.T) {
 	pool := integrationPool(t, &trace)
 	pair := storefixture.NewPair(t, pool)
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO store_memberships (store_id, user_id, status, created_at, updated_at)
-		SELECT $1::uuid, (substr(md5(value::text), 1, 8) || '-' || substr(md5(value::text), 9, 4) || '-4' || substr(md5(value::text), 14, 3) || '-8' || substr(md5(value::text), 18, 3) || '-' || substr(md5(value::text), 21, 12))::uuid, 'active', now(), now()
+		INSERT INTO users (store_id,user_id,status,created_at,updated_at)
+		SELECT $1::uuid, (substr(md5($1::text || value::text), 1, 8) || '-' || substr(md5($1::text || value::text), 9, 4) || '-4' || substr(md5($1::text || value::text), 14, 3) || '-8' || substr(md5($1::text || value::text), 18, 3) || '-' || substr(md5($1::text || value::text), 21, 12))::uuid, 'active', now(), now()
+		FROM generate_series(1, 10000) AS value
+		ON CONFLICT DO NOTHING`, pair.A.Store.ID().String())
+	if err != nil {
+		t.Fatalf("seed representative users: %v", err)
+	}
+	_, err = pool.Exec(context.Background(), `
+		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
+		SELECT $1::uuid, (substr(md5($1::text || value::text), 1, 8) || '-' || substr(md5($1::text || value::text), 9, 4) || '-4' || substr(md5($1::text || value::text), 14, 3) || '-8' || substr(md5($1::text || value::text), 18, 3) || '-' || substr(md5($1::text || value::text), 21, 12))::uuid, 'active', 'staff', now(), now()
 		FROM generate_series(1, 10000) AS value
 		ON CONFLICT DO NOTHING`, pair.A.Store.ID().String())
 	if err != nil {
 		t.Fatalf("seed representative memberships: %v", err)
 	}
 	trace.count.Store(0)
-	_, found, err := storepostgres.NewRepository(pool).ResolveTenant(context.Background(), pair.A.Store.ID(), pair.A.UserID)
+	_, found, err := storepostgres.NewRepository(pool, auditpostgres.NewWriter()).ResolveTenant(context.Background(), pair.A.Store.ID(), pair.A.UserID)
 	if err != nil || !found || trace.count.Load() != 1 {
 		t.Fatalf("ResolveTenant() = found %v, error %v, queries %d", found, err, trace.count.Load())
 	}
@@ -215,7 +269,7 @@ func TestResolveTenantHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, _, err = storepostgres.NewRepository(pool).ResolveTenant(ctx, pair.A.Store.ID(), pair.A.UserID)
+	_, _, err = storepostgres.NewRepository(pool, auditpostgres.NewWriter()).ResolveTenant(ctx, pair.A.Store.ID(), pair.A.UserID)
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
 		t.Fatalf("ResolveTenant() error = %v after %s", err, time.Since(started))
 	}
@@ -224,7 +278,7 @@ func TestResolveTenantHonorsCancellation(t *testing.T) {
 func BenchmarkResolveTenantPostgres(b *testing.B) {
 	pool := integrationPool(b, nil)
 	pair := storefixture.NewPair(b, pool)
-	repository := storepostgres.NewRepository(pool)
+	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -278,4 +332,12 @@ func assertExecRejected(tb testing.TB, pool *pgxpool.Pool, statement string, arg
 	}
 }
 
-var _ application.Repository = (*storepostgres.Repository)(nil)
+func insertTenantUser(tb testing.TB, pool *pgxpool.Pool, storeID ids.StoreID, userID ids.UserID) {
+	tb.Helper()
+	if _, err := pool.Exec(context.Background(), `INSERT INTO users (store_id,user_id,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,'active',now(),now())`, storeID.String(), userID.String()); err != nil {
+		tb.Fatalf("insert tenant user: %v", err)
+	}
+}
+
+var _ application.StoreResolverRepository = (*storepostgres.Repository)(nil)
+var _ application.TenantRepository = (*storepostgres.Repository)(nil)

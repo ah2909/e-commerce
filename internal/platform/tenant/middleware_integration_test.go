@@ -13,11 +13,12 @@ import (
 	"testing"
 	"time"
 
+	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/problem"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
-	"github.com/ah2909/e-commerce/internal/stores/domain"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,7 @@ import (
 func TestMiddlewareDeniesCrossStoreThroughPostgres(t *testing.T) {
 	pool := tenantIntegrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool))
+	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool, auditpostgres.NewWriter()))
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	called := 0
 	middleware := NewMiddleware(resolver, logger, 500*time.Millisecond)
@@ -43,11 +44,11 @@ func TestMiddlewareDeniesCrossStoreThroughPostgres(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), `UPDATE store_memberships SET status = 'inactive', updated_at = now() WHERE store_id = $1::uuid AND user_id = $2::uuid`, pair.B.Store.ID().String(), pair.B.UserID.String()); err != nil {
 		t.Fatalf("deactivate fixture membership: %v", err)
 	}
-	missingStoreID, _ := domain.NewStoreID()
+	missingStoreID, _ := ids.NewStoreID()
 	tests := []struct {
 		name    string
-		userID  domain.UserID
-		storeID domain.StoreID
+		userID  ids.UserID
+		storeID ids.StoreID
 	}{
 		{name: "A user requests B", userID: pair.A.UserID, storeID: pair.B.Store.ID()},
 		{name: "B user requests A", userID: pair.B.UserID, storeID: pair.A.Store.ID()},
@@ -89,7 +90,7 @@ func TestMiddlewareTimesOutBlockedPostgresResolution(t *testing.T) {
 	if _, err := lock.Exec(context.Background(), `LOCK TABLE store_memberships IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatalf("lock memberships: %v", err)
 	}
-	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool))
+	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool, auditpostgres.NewWriter()))
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	middleware := NewMiddleware(resolver, logger, 25*time.Millisecond)

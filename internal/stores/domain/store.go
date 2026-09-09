@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"golang.org/x/text/currency"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
@@ -21,6 +22,28 @@ const (
 
 var ErrInvalidStore = errors.New("invalid store")
 
+type Subdomain string
+
+var reservedSubdomains = map[string]struct{}{"admin": {}, "api": {}, "auth": {}, "www": {}}
+
+func ParseSubdomain(value string) (Subdomain, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) < 3 || len(value) > 63 || value[0] == '-' || value[len(value)-1] == '-' {
+		return "", fmt.Errorf("%w: subdomain", ErrInvalidStore)
+	}
+	if _, reserved := reservedSubdomains[value]; reserved {
+		return "", fmt.Errorf("%w: reserved subdomain", ErrInvalidStore)
+	}
+	for _, character := range value {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+			return "", fmt.Errorf("%w: subdomain", ErrInvalidStore)
+		}
+	}
+	return Subdomain(value), nil
+}
+
+func (subdomain Subdomain) String() string { return string(subdomain) }
+
 type StoreStatus string
 
 const (
@@ -29,7 +52,8 @@ const (
 )
 
 type Store struct {
-	id              StoreID
+	id              ids.StoreID
+	subdomain       Subdomain
 	name            string
 	status          StoreStatus
 	defaultCurrency string
@@ -41,7 +65,8 @@ type Store struct {
 }
 
 type StoreValues struct {
-	ID              StoreID
+	ID              ids.StoreID
+	Subdomain       Subdomain
 	Name            string
 	Status          StoreStatus
 	DefaultCurrency string
@@ -52,9 +77,14 @@ type StoreValues struct {
 	UpdatedAt       time.Time
 }
 
-func NewStore(id StoreID, name, defaultCurrency, locale, timezone string, now time.Time) (Store, error) {
+func NewStore(id ids.StoreID, subdomainValue, name, defaultCurrency, locale, timezone string, now time.Time) (Store, error) {
+	subdomain, err := ParseSubdomain(subdomainValue)
+	if err != nil {
+		return Store{}, err
+	}
 	return RestoreStore(StoreValues{
 		ID:              id,
+		Subdomain:       subdomain,
 		Name:            name,
 		Status:          StoreStatusActive,
 		DefaultCurrency: defaultCurrency,
@@ -67,8 +97,12 @@ func NewStore(id StoreID, name, defaultCurrency, locale, timezone string, now ti
 }
 
 func RestoreStore(values StoreValues) (Store, error) {
-	if _, err := ParseStoreID(values.ID.String()); err != nil {
+	if _, err := ids.ParseStoreID(values.ID.String()); err != nil {
 		return Store{}, fmt.Errorf("%w: store ID", ErrInvalidStore)
+	}
+	subdomain, err := ParseSubdomain(values.Subdomain.String())
+	if err != nil {
+		return Store{}, err
 	}
 	name := norm.NFC.String(strings.TrimSpace(values.Name))
 	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > maxNameRunes {
@@ -99,6 +133,7 @@ func RestoreStore(values StoreValues) (Store, error) {
 	}
 	return Store{
 		id:              values.ID,
+		subdomain:       subdomain,
 		name:            name,
 		status:          values.Status,
 		defaultCurrency: currencyCode,
@@ -119,7 +154,8 @@ func normalizeCurrency(value string) (string, error) {
 	return code, nil
 }
 
-func (s Store) ID() StoreID             { return s.id }
+func (s Store) ID() ids.StoreID         { return s.id }
+func (s Store) Subdomain() Subdomain    { return s.subdomain }
 func (s Store) Name() string            { return s.name }
 func (s Store) Status() StoreStatus     { return s.status }
 func (s Store) DefaultCurrency() string { return s.defaultCurrency }
@@ -129,5 +165,5 @@ func (s Store) SettingsVersion() int64  { return s.settingsVersion }
 func (s Store) CreatedAt() time.Time    { return s.createdAt }
 func (s Store) UpdatedAt() time.Time    { return s.updatedAt }
 func (s Store) Values() StoreValues {
-	return StoreValues{ID: s.id, Name: s.name, Status: s.status, DefaultCurrency: s.defaultCurrency, Locale: s.locale, Timezone: s.timezone, SettingsVersion: s.settingsVersion, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt}
+	return StoreValues{ID: s.id, Subdomain: s.subdomain, Name: s.name, Status: s.status, DefaultCurrency: s.defaultCurrency, Locale: s.locale, Timezone: s.timezone, SettingsVersion: s.settingsVersion, CreatedAt: s.createdAt, UpdatedAt: s.updatedAt}
 }

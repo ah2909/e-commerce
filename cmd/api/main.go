@@ -12,10 +12,30 @@ import (
 	"syscall"
 	"time"
 
+	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
+	identitydomain "github.com/ah2909/e-commerce/internal/identity/domain"
+	identitypassword "github.com/ah2909/e-commerce/internal/identity/infrastructure/password"
+	identitypostgres "github.com/ah2909/e-commerce/internal/identity/infrastructure/postgres"
+	identitysocial "github.com/ah2909/e-commerce/internal/identity/infrastructure/social"
+	"github.com/ah2909/e-commerce/internal/identity/infrastructure/token"
+	identityhttp "github.com/ah2909/e-commerce/internal/identity/transport/http"
+	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
+	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
+	onboardinghttp "github.com/ah2909/e-commerce/internal/onboarding/transport/http"
+	"github.com/ah2909/e-commerce/internal/platform/adminauth"
+	"github.com/ah2909/e-commerce/internal/platform/clientaddr"
 	"github.com/ah2909/e-commerce/internal/platform/config"
 	"github.com/ah2909/e-commerce/internal/platform/health"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/logging"
+	"github.com/ah2909/e-commerce/internal/platform/ratelimit"
+	"github.com/ah2909/e-commerce/internal/platform/redisstore"
+	"github.com/ah2909/e-commerce/internal/platform/tenant"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
+	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
+	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	storeshttp "github.com/ah2909/e-commerce/internal/stores/transport/http"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -60,10 +80,58 @@ func run() error {
 	}, cfg.DependencyTimeout)
 	mux := http.NewServeMux()
 	healthHandler.Register(mux)
+	storeRepository := storespostgres.NewRepository(pool, auditpostgres.NewWriter())
+	identityRepository := identitypostgres.NewRepository(pool)
+	hostMiddleware := tenant.NewHostMiddleware(storesapplication.NewResolveStore(storeRepository), cfg.TenantBaseDomain, cfg.AuthHost, logger, cfg.TenantResolutionTimeout)
+	passwordHasher, err := identitypassword.NewArgon2ID(cfg.PasswordHashConcurrency)
+	if err != nil {
+		return fmt.Errorf("initialize password hasher: %w", err)
+	}
+	identityService := identityapplication.NewService(identityRepository, passwordHasher, storeRepository, token.Generator{}, identityapplication.SessionSettings{AccessTTL: cfg.AccessTokenTTL, SessionTTL: cfg.SessionTTL}, time.Now)
+	providerClient := &http.Client{
+		Timeout:       cfg.DependencyTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	providers := make(map[identitydomain.Provider]identityapplication.SocialProvider)
+	if cfg.GoogleClientID != "" {
+		google, err := identitysocial.NewGoogle(ctx, providerClient, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL)
+		if err != nil {
+			return fmt.Errorf("initialize Google login: %w", err)
+		}
+		providers[identitydomain.ProviderGoogle] = google
+	}
+	if cfg.FacebookAppID != "" {
+		facebook, err := identitysocial.NewFacebook(providerClient, cfg.FacebookAppID, cfg.FacebookAppSecret, cfg.FacebookRedirectURL, cfg.FacebookGraphVersion)
+		if err != nil {
+			return fmt.Errorf("initialize Facebook login: %w", err)
+		}
+		providers[identitydomain.ProviderFacebook] = facebook
+	}
+	socialService := identityapplication.NewSocialService(identityRepository, identityService, redisstore.NewSocial(redisClient, cfg.DependencyTimeout), providers, cfg.SocialReturnPaths, identityapplication.SocialSettings{TransactionTTL: cfg.SocialTransactionTTL, ExchangeTTL: cfg.SocialExchangeTTL}, time.Now)
+	identitySettings := identityhttp.Settings{
+		OperationTimeout: cfg.DependencyTimeout,
+		TenantBaseDomain: cfg.TenantBaseDomain,
+		AuthHost:         cfg.AuthHost,
+		Registration:     identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.RegistrationRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.RegistrationRateLimit.IdentityMaximum), Window: cfg.RegistrationRateLimit.Window},
+		Login:            identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.LoginRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.LoginRateLimit.IdentityMaximum), Window: cfg.LoginRateLimit.Window},
+		Token:            identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.TokenRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.TokenRateLimit.IdentityMaximum), Window: cfg.TokenRateLimit.Window},
+		Social:           identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.SocialRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.SocialRateLimit.IdentityMaximum), Window: cfg.SocialRateLimit.Window},
+		GuestCreation:    identityhttp.RatePolicy{Maximum: int64(cfg.GuestCreationRateLimit.Maximum), Window: cfg.GuestCreationRateLimit.Window},
+	}
+	identityHandler := identityhttp.NewHandler(identityService, socialService, ratelimit.NewRedis(redisClient, cfg.DependencyTimeout), logger, identitySettings)
+	identityHandler.Register(mux, hostMiddleware)
+	onboardingRepository := onboardingpostgres.NewRepository(pool, storeRepository, identityRepository)
+	onboardingService := onboardingapplication.NewService(onboardingRepository, identityService, ids.NewStoreID, time.Now)
+	onboardingHandler := onboardinghttp.NewHandler(onboardingService, ratelimit.NewRedis(redisClient, cfg.DependencyTimeout), logger, cfg.DependencyTimeout, int64(cfg.PlatformProvisionRateLimit.Maximum), cfg.PlatformProvisionRateLimit.Window)
+	onboardingHandler.Register(mux, hostMiddleware, adminauth.New(cfg.PlatformAdminToken).Authenticate)
+	membershipManager := storesapplication.NewMembershipManager(storeRepository, identityRepository, time.Now)
+	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(storeRepository), logger, cfg.TenantResolutionTimeout)
+	storesHandler := storeshttp.NewHandler(membershipManager, identityHandler.AuthenticateUser, tenantMiddleware, logger, cfg.DependencyTimeout)
+	storesHandler.Register(mux, hostMiddleware)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           httpserver.Middleware(logger, mux),
+		Handler:           httpserver.Middleware(logger, clientaddr.New(cfg.TrustedProxyCIDRs).Middleware(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      apiWriteTimeout(cfg.DependencyTimeout),

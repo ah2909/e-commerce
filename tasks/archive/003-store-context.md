@@ -2,7 +2,7 @@
 
 ## Context
 
-Read [product requirements](../docs/product-requirements.md), [architecture](../docs/architecture.md), [domain model](../docs/domain-model.md), [testing strategy](../docs/testing-strategy.md), [shared-schema tenancy ADR](../docs/decisions/002-shared-schema-tenancy.md), and [roadmap](../docs/implementation-roadmap.md). This is roadmap slice 2 and builds on the completed service bootstrap in [task 001](001-bootstrap.md).
+Read [product requirements](../../docs/product-requirements.md), [architecture](../../docs/architecture.md), [domain model](../../docs/domain-model.md), [testing strategy](../../docs/testing-strategy.md), [shared-schema tenancy ADR](../../docs/decisions/002-shared-schema-tenancy.md), and [roadmap](../../docs/implementation-roadmap.md). This is roadmap slice 2 and builds on the completed service bootstrap in [task 001](001-bootstrap.md).
 
 ## Outcome
 
@@ -141,6 +141,8 @@ The backend can create and persist a store with its creator's membership, resolv
 - Risks, assumptions, and follow-ups
 
 ## Delivery record
+
+Task 004 supersedes this slice's internal creator-driven store creation path: public provisioning now requires a deployment platform principal and creates the initial owner account and membership through the cross-module onboarding unit of work.
 
 - Active task: no
 - Execution mode: automatic

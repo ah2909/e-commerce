@@ -1,6 +1,7 @@
 -- +goose Up
 CREATE TABLE stores (
     store_id uuid PRIMARY KEY,
+    subdomain text NOT NULL,
     name text NOT NULL,
     status text NOT NULL,
     default_currency varchar(3) NOT NULL,
@@ -10,6 +11,7 @@ CREATE TABLE stores (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT stores_name_valid CHECK (name = btrim(name) AND char_length(name) BETWEEN 1 AND 120),
+    CONSTRAINT stores_subdomain_valid CHECK (subdomain ~ '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$' AND subdomain NOT IN ('admin', 'api', 'auth', 'www')),
     CONSTRAINT stores_status_valid CHECK (status IN ('active', 'suspended')),
     CONSTRAINT stores_currency_valid CHECK (default_currency ~ '^[A-Z]{3}$'),
     CONSTRAINT stores_locale_valid CHECK (char_length(locale) BETWEEN 2 AND 35),
@@ -17,6 +19,20 @@ CREATE TABLE stores (
     CONSTRAINT stores_settings_version_valid CHECK (settings_version > 0),
     CONSTRAINT stores_timestamps_valid CHECK (updated_at >= created_at)
 );
+
+CREATE UNIQUE INDEX stores_subdomain_uidx ON stores (subdomain);
+
+-- +goose StatementBegin
+CREATE FUNCTION prevent_store_subdomain_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.subdomain <> OLD.subdomain THEN
+        RAISE EXCEPTION 'store subdomain is immutable';
+    END IF;
+    RETURN NEW;
+END $$;
+-- +goose StatementEnd
+
+CREATE TRIGGER stores_subdomain_immutable BEFORE UPDATE OF subdomain ON stores FOR EACH ROW EXECUTE FUNCTION prevent_store_subdomain_change();
 
 CREATE TABLE store_memberships (
     store_id uuid NOT NULL,

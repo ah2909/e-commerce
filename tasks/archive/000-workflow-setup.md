@@ -11,7 +11,7 @@ The user requested this setup and confirmed the single plan approval checkpoint,
 ## Delivery record
 
 - Stage: complete for workflow configuration, 2026-09-06.
-- Workflow: [delivery procedure](../docs/development-workflow.md).
+- Workflow: [delivery procedure](../../docs/development-workflow.md).
 - Changed areas: project instructions, reusable skill, project agent settings/roles, README, task template, bootstrap CI contract, workflow validator, and GitHub Actions.
 - Design: one implementing agent owns edits; two independent reviewers inspect stable artifacts; substantive fixes require affected re-review; required failures remain blocking.
 - Architect review: independent `architect_review` agent, pass, no findings.

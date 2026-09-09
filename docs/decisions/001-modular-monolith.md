@@ -2,16 +2,20 @@
 
 Status: Accepted
 
+## Context
+
+The product model and workload are still evolving. Checkout needs strong consistency across order, pricing, inventory, payment initialization, audit, and outbox records. Premature network boundaries would add partial failure and operating cost before independent scale or ownership needs are known.
+
 ## Decision
 
-Deploy the application initially as an API process and worker process from one repository, with explicit domain modules and ownership boundaries.
+Deploy one repository as a stateless API process and one or more stateless worker process types. Organize business capabilities as explicit modules with exclusive table and domain-rule ownership.
 
-## Rationale
-
-This minimizes operational and consistency complexity while the product model is evolving. Module contracts preserve a future extraction path.
+Cross-module synchronous interactions use consumer-owned application interfaces. Asynchronous side effects use versioned events through the transactional outbox. A small number of documented workflows, such as checkout and tenant provisioning, may coordinate one PostgreSQL transaction without permitting arbitrary cross-module table access.
 
 ## Consequences
 
-- One database may contain schemas/tables for multiple modules, but table ownership remains exclusive.
-- Cross-module transactions are allowed only for documented critical workflows such as checkout.
-- Engineers must prevent convenience queries from eroding boundaries.
+- One database may contain tables owned by several modules, but direct cross-module queries and mutations are prohibited.
+- API and worker instances can scale horizontally without splitting code ownership.
+- Module extraction remains possible but requires an ADR covering ownership, API/event contracts, data migration, consistency, failure handling, observability, and rollback.
+- Extraction is justified only by measured scaling, team ownership, release cadence, failure-isolation, or regulatory needs.
+- Shared libraries remain limited to stable primitives and cannot become an unowned business layer.

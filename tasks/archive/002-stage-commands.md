@@ -4,7 +4,7 @@ Historical record: the optional workflow validator, its tests, and its CI job we
 
 ## Context and outcome
 
-Extend [the delivery workflow](../docs/development-workflow.md) with five project-local skills: `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test`. Each performs one stage and stops. Preserve `$ecommerce-delivery` for explicitly selected automatic delivery.
+Extend [the delivery workflow](../../docs/development-workflow.md) with five project-local skills: `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test`. Each performs one stage and stops. Preserve `$ecommerce-delivery` for explicitly selected automatic delivery.
 
 ## Scope and constraints
 

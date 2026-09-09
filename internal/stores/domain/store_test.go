@@ -6,20 +6,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"golang.org/x/text/unicode/norm"
 )
 
 const testStoreID = "018f0f7d-7b3d-7d2e-8f4f-3b86f31f2741"
 
 func TestNewStoreVietnamDefaultsAndUnicode(t *testing.T) {
-	id, err := ParseStoreID(testStoreID)
+	id, err := ids.ParseStoreID(testStoreID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.FixedZone("ICT", 7*60*60))
 	decomposed := "  Cửa hàng A\u0301nh Dương  "
 
-	store, err := NewStore(id, decomposed, DefaultCurrency, DefaultLocale, DefaultTimezone, now)
+	store, err := NewStore(id, "sunrise", decomposed, DefaultCurrency, DefaultLocale, DefaultTimezone, now)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -38,8 +39,8 @@ func TestNewStoreVietnamDefaultsAndUnicode(t *testing.T) {
 }
 
 func TestNewStorePreservesExplicitInternationalSettings(t *testing.T) {
-	id, _ := ParseStoreID(testStoreID)
-	store, err := NewStore(id, "Global Store", "usd", "en-US", "America/New_York", time.Now())
+	id, _ := ids.ParseStoreID(testStoreID)
+	store, err := NewStore(id, "global-store", "Global Store", "usd", "en-US", "America/New_York", time.Now())
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -49,9 +50,10 @@ func TestNewStorePreservesExplicitInternationalSettings(t *testing.T) {
 }
 
 func TestRestoreStoreRejectsInvalidValues(t *testing.T) {
-	id, _ := ParseStoreID(testStoreID)
+	id, _ := ids.ParseStoreID(testStoreID)
 	now := time.Now()
-	valid := StoreValues{ID: id, Name: "Cửa hàng", Status: StoreStatusActive, DefaultCurrency: "VND", Locale: "vi-VN", Timezone: "Asia/Ho_Chi_Minh", SettingsVersion: 1, CreatedAt: now, UpdatedAt: now}
+	subdomain, _ := ParseSubdomain("sunrise")
+	valid := StoreValues{ID: id, Subdomain: subdomain, Name: "Cửa hàng", Status: StoreStatusActive, DefaultCurrency: "VND", Locale: "vi-VN", Timezone: "Asia/Ho_Chi_Minh", SettingsVersion: 1, CreatedAt: now, UpdatedAt: now}
 	tests := []struct {
 		name   string
 		mutate func(*StoreValues)
@@ -77,18 +79,30 @@ func TestRestoreStoreRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestParseSubdomainNormalizesAndRejectsReservedOrMalformedLabels(t *testing.T) {
+	parsed, err := ParseSubdomain("  My-Store  ")
+	if err != nil || parsed.String() != "my-store" {
+		t.Fatalf("ParseSubdomain() = %q, %v", parsed, err)
+	}
+	for _, value := range []string{"ab", "-shop", "shop-", "shop.example", "www", "auth", "cửa-hàng"} {
+		if _, err := ParseSubdomain(value); !errors.Is(err, ErrInvalidStore) {
+			t.Errorf("ParseSubdomain(%q) error = %v", value, err)
+		}
+	}
+}
+
 func TestTypedIDs(t *testing.T) {
 	tests := []string{"", "00000000-0000-0000-0000-000000000000", "not-a-uuid", "018f0f7d7b3d7d2e8f4f3b86f31f2741"}
 	for _, value := range tests {
-		if _, err := ParseStoreID(value); !errors.Is(err, ErrInvalidID) {
+		if _, err := ids.ParseStoreID(value); !errors.Is(err, ids.ErrInvalid) {
 			t.Fatalf("ParseStoreID(%q) error = %v", value, err)
 		}
 	}
-	generated, err := NewStoreID()
+	generated, err := ids.NewStoreID()
 	if err != nil {
 		t.Fatalf("NewStoreID() error = %v", err)
 	}
-	if _, err := ParseStoreID(generated.String()); err != nil {
+	if _, err := ids.ParseStoreID(generated.String()); err != nil {
 		t.Fatalf("generated ID = %q: %v", generated, err)
 	}
 }

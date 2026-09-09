@@ -1,59 +1,70 @@
-# Multi-store E-commerce Backend
+# Multi-store e-commerce backend
 
-Codex-ready foundation for a configurable multi-store e-commerce backend written in Go.
+Go backend for independent Vietnamese stores. It is designed for subdomain-isolated SaaS and customer-managed deployments, with PostgreSQL as the transactional source of truth.
 
-## Product goal
+The design covers the full MVP; the implementation does not yet. Read [development status](docs/development-status.md) before using or deploying the current code.
 
-Build one backend that serves many independent stores. Each store can configure its catalog, prices, inventory, checkout, payment, shipping, and staff access without exposing data to another store.
+## Documentation
 
-## Initial architecture
+| Document | Purpose |
+| --- | --- |
+| [Product requirements](docs/product-requirements.md) | Actors, MVP behavior, exclusions, and success criteria |
+| [System architecture](docs/architecture.md) | Components, module boundaries, deployment modes, security, reliability, and scaling |
+| [Domain model](docs/domain-model.md) | Aggregates, invariants, and state transitions |
+| [Database design](docs/database-design.md) | Table ownership, tenant keys, constraints, indexes, transactions, retention, and growth |
+| [Event catalog](docs/event-catalog.md) | Versioned integration facts and delivery rules |
+| [Testing strategy](docs/testing-strategy.md) | Required correctness, isolation, provider, concurrency, and operational tests |
+| [Implementation roadmap](docs/implementation-roadmap.md) | Ordered delivery slices and release milestones |
+| [Development status](docs/development-status.md) | Evidence-backed implemented, incomplete, and not-started state |
+| [Architecture decisions](docs/decisions/) | Durable decisions and consequences |
+| [Development workflow](docs/development-workflow.md) | Task approval, build, review, fix, and verification gates |
+| [Task index](tasks/README.md) | Active work and archived delivery records |
 
-- Go modular monolith
-- PostgreSQL as the system of record
-- Redis for cache, rate limiting, and short-lived coordination
-- Kafka for asynchronous side effects
-- Transactional outbox for reliable event publication
-- REST API documented with OpenAPI
-- Docker Compose for local dependencies
+## Architecture summary
+
+- Stateless API and worker processes in a modular monolith
+- PostgreSQL for authoritative state, transactions, idempotency, outbox/inbox, and audit
+- Redis for rate limits, short-lived social state, and reconstructable cache only
+- Kafka for asynchronous side effects after transactional outbox commit
+- Shared-schema tenancy with mandatory store scope and composite tenant foreign keys
+- Host-selected tenant context before user or guest authentication
+- Integer VND money, atomic inventory reservations, immutable order snapshots, and idempotent payments/refunds
 
 ## Local development
 
 Prerequisites:
 
-- Go 1.26.6 or newer compatible patch release
+- Go version declared in [go.mod](go.mod)
 - GNU Make
 - Docker with Compose
 
-Start the disposable dependencies and wait for them to become healthy:
+Start disposable PostgreSQL, Redis, and Kafka dependencies:
 
 ```bash
 make dev-deps
 ```
 
-Compose publishes PostgreSQL, Redis, and Kafka only on the host loopback interface and does not restart them automatically.
-
-Start the API:
+Apply runtime migrations and run the API:
 
 ```bash
+make migrate-up
 make run-api
 ```
 
-The Makefile supplies the development defaults from `.env.example`. Direct `go run` commands require those environment variables to be exported first. Check the service from another terminal:
+Run the worker in another terminal when needed:
+
+```bash
+make run-worker
+```
+
+Health endpoints:
 
 ```bash
 curl -i http://localhost:8080/health/live
 curl -i http://localhost:8080/health/ready
 ```
 
-Liveness reports whether the API process can serve requests. Readiness checks PostgreSQL and Redis with a bounded timeout and returns HTTP 503 if either is unavailable. It never includes raw dependency errors. Kafka is asynchronous infrastructure and does not gate API readiness.
-
-The worker entry point currently exercises configuration, structured logging, and signal-driven shutdown; event processing is a later roadmap task:
-
-```bash
-make run-worker
-```
-
-Stop either process with Ctrl+C. Stop the dependencies and delete only this Compose project's disposable volumes with:
+Stop dependencies without deleting their volumes:
 
 ```bash
 make dev-deps-down
@@ -61,101 +72,68 @@ make dev-deps-down
 
 ## Configuration
 
-| Variable | Development default | Purpose |
-| --- | --- | --- |
-| `APP_ENV` | `development` | Runtime environment label used in logs. |
-| `HTTP_ADDRESS` | `:8080` | API listen address. |
-| `LOG_LEVEL` | `debug` | `slog` level such as `debug`, `info`, `warn`, or `error`. |
-| `DATABASE_URL` | Local PostgreSQL URL | PostgreSQL connection URL; required outside Make defaults. |
-| `TEST_DATABASE_URL` | Local `ecommerce_test` PostgreSQL URL | Isolated database used only by integration tests and benchmarks. |
-| `ALLOW_TEST_DATABASE_MUTATION` | `true` through Make | Explicit sentinel required before integration tests may mutate the test database. |
-| `REDIS_ADDRESS` | `localhost:6379` | Redis host and port; required outside Make defaults. |
-| `KAFKA_BROKERS` | `localhost:9092` | Comma-separated Kafka brokers; required outside Make defaults. |
-| `SHUTDOWN_TIMEOUT` | `10s` | Maximum graceful API shutdown time; must be positive and no more than two minutes. |
-| `DEPENDENCY_TIMEOUT` | `2s` | Readiness-check deadline; must be positive and no more than 30 seconds. |
-| `TENANT_RESOLUTION_TIMEOUT` | `500ms` | Store-membership lookup deadline; must be positive and no more than 5 seconds. |
+[`.env.example`](.env.example) lists development configuration and disposable local credentials. `make` supplies those development defaults; direct `go run` commands require the variables in the process environment.
 
-New stores default omitted regional settings to `VND`, `vi-VN`, and `Asia/Ho_Chi_Minh`. Explicit valid currency, locale, and timezone values remain supported for stores in other markets. Store names preserve Vietnamese diacritics and are normalized to Unicode NFC.
+Important boundaries:
 
-Apply forward-only database migrations before starting code that uses new tables:
+- `TENANT_BASE_DOMAIN` and `AUTH_HOST` define trusted host routing.
+- `PLATFORM_ADMIN_TOKEN` protects base-domain store provisioning and has no Makefile default; supply 32 random bytes encoded as unpadded base64url through the environment or a secret manager. The value in `.env.example` is for local development only.
+- `TRUSTED_PROXY_CIDRS` controls when forwarded client addresses may influence rate limiting; it never affects tenant host selection.
+- `DATABASE_URL` is runtime state; `TEST_DATABASE_URL` must identify a loopback database ending in `_test` before integration mutation is allowed.
+- Google or Facebook login remains disabled unless its complete provider configuration is present and valid.
+- Provider, database, Redis, and token configuration must come from deployment secrets/configuration, never committed production values.
+- Future store-owned VietQR/MoMo secrets require encrypted persistence and an external key; that payment functionality is not implemented yet.
+
+The public contract currently implemented is [api/openapi.json](api/openapi.json).
+
+## Database operations
 
 ```bash
 make migrate-up
+make migrate-status
 ```
 
-Use `make migrate-status` to inspect the runtime database migration version. Schema recovery uses a forward-fix migration rather than a destructive down migration.
+Migrations are forward-only. Use a forward fix for schema recovery. Production migration or database reset requires explicit operational authorization.
 
-Integration tests and store-context benchmarks use `TEST_DATABASE_URL`, require `ALLOW_TEST_DATABASE_MUTATION=true`, and refuse non-loopback hosts or database names without the `_test` suffix. The disposable Compose PostgreSQL initializes `ecommerce_test` separately from the runtime `ecommerce` database.
+Integration tests use a separately guarded test database:
 
-Run `make benchmark-store-context` with PostgreSQL available to reproduce the tenant middleware and indexed membership-resolution baselines. Benchmark results are evidence for comparison and are not enforced as machine-dependent CI latency limits.
-
-`.env.example` contains disposable local credentials only. Keep production credentials in the deployment environment and out of this repository.
+```bash
+make migrate-test-up
+make test-integration
+```
 
 ## Verification
 
-With the dependencies running, execute the complete local gate:
+Run the complete local gate with dependencies available:
 
 ```bash
 make verify
 ```
 
-It installs pinned tools under the ignored `.tools` directory, checks formatting and lint, runs unit and PostgreSQL/Redis integration tests, and scans reachable Go code for known vulnerabilities. On supported non-Windows hosts, tests use the Go race detector. Run the verification target in WSL or CI when a native Windows C toolchain for `-race` is unavailable.
+Individual checks are:
 
-Individual targets are `make fmt-check`, `make lint`, `make test`, `make test-integration`, and `make vulncheck`. Use `make fmt` to apply Go formatting.
+```bash
+make fmt-check
+make lint
+make test
+make test-integration
+make vulncheck
+```
 
-## Troubleshooting
+On native Windows, race-enabled Go tests may be unavailable; use CI or WSL for race evidence. Never interpret an unavailable integration dependency or vulnerability database as a passing check.
 
-- If `make dev-deps` cannot connect to Docker, start Docker Desktop and retry.
-- If a container cannot bind port 5432, 6379, or 9092, stop the conflicting local service or change both Compose and the matching connection variable.
-- If readiness returns HTTP 503, run `docker compose ps` and inspect the unhealthy PostgreSQL or Redis container with `docker compose logs <service>`.
-- If old disposable data prevents a clean start, run `make dev-deps-down` before `make dev-deps`.
-- If `make verify` cannot download tools or vulnerability data, restore network access and rerun the failed target; do not treat that check as passing.
+## Delivery workflow
 
-Read these files before implementation:
+Work is tracked as one approved task through planning, implementation, independent architecture/security reviews, fixes, and final verification. Completed records are retained under [`tasks/archive`](tasks/archive/); incomplete work remains at the task root.
 
-1. `AGENTS.md`
-2. `docs/product-requirements.md`
-3. `docs/architecture.md`
-4. `docs/domain-model.md`
-5. `docs/testing-strategy.md`
-6. `docs/implementation-roadmap.md`
+Use the stage command appropriate to the next gate, for example:
 
-## Project workflow with Codex
+```text
+$ec-plan tasks/<task>.md
+$ec-build tasks/<task>.md
+$ec-review tasks/<task>.md
+$ec-fix tasks/<task>.md
+$ec-test tasks/<task>.md
+```
 
-1. Select one roadmap slice.
-2. Copy `tasks/TEMPLATE.md` to a new task file.
-3. Fill in scope, acceptance criteria, and invariants.
-4. Ask: `Use $ecommerce-delivery for tasks/001-bootstrap.md. Clarify requirements and propose the plan first.`
-5. Approve the plan, including its technical solution and test strategy.
-6. Codex implements, runs independent architect and security reviews in parallel, fixes findings, and completes testing automatically.
-7. Inspect the completion evidence before merging.
-
-See [the delivery workflow](docs/development-workflow.md) for approval rules, review gates, CI setup, and bootstrap limitations. This workflow is configured only inside this project.
-
-For stage-by-stage control, send one command at a time:
-
-| Command | Result |
-| --- | --- |
-| `$ec-plan tasks/001-bootstrap.md` | Prepare the plan and stop for inspection. |
-| `$ec-build` | After plan approval, implement and run focused tests, then stop. |
-| `$ec-review` | Run architect/security reviews in parallel and report findings. |
-| `$ec-fix` | Fix findings and run regression tests, then stop. |
-| `$ec-test` | Run final checks and report results without repairing code. |
-
-Task paths are optional after a task is unambiguously selected. Approve the plan before `$ec-build`. After fixes, use `$ec-review` again to verify them before completion. Each stage command stops without automatically starting the next stage; approving the plan alone also preserves that behavior. Use `$ecommerce-delivery` to explicitly return the active task to automatic delivery.
-
-These are project skills invoked with `$`, not custom slash aliases. If newly added skills are not listed, restart the Codex session.
-
-## First task
-
-Use `tasks/001-bootstrap.md`. It deliberately creates infrastructure and one health endpoint only. Domain implementation starts after the repository can be built and verified consistently.
-
-## Definition of done
-
-- Acceptance criteria are satisfied.
-- Tenant boundaries and business invariants are preserved.
-- Unit and integration tests cover success and failure paths.
-- API/schema changes are documented.
-- Independent architect and security reviews have no unresolved blocking findings on the final implementation.
-- Formatting, static analysis, tests, and vulnerability checks pass.
-- No credentials or generated build artifacts are committed.
+Use `$ecommerce-delivery` only when automatic progression through all approved stages is intended. See the [development workflow](docs/development-workflow.md) for authoritative rules.

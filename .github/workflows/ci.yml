@@ -36,7 +36,7 @@ jobs:
         run: |
           for file in go.mod Makefile .env.example; do
             if [[ ! -f "$file" ]]; then
-              echo "::error::Missing $file. Complete tasks/001-bootstrap.md; backend verification is unavailable."
+              echo "::error::Missing $file. See tasks/archive/001-bootstrap.md; backend verification is unavailable."
               exit 1
             fi
           done

@@ -1,112 +1,254 @@
-# Domain Model
+# Domain model
 
-## Shared value objects
+## Conventions
 
-- `StoreID`, `UserID`, and aggregate-specific typed identifiers
-- `Money { AmountMinor int64, Currency string }`
-- `Quantity` with explicit unit/precision policy
-- `Email`, `Address`, and UTC timestamps
-- `IdempotencyKey`
+- Every tenant-owned aggregate carries `StoreID` and can be loaded only with that scope.
+- Aggregate identifiers are opaque UUIDs. Human-facing order numbers are store-scoped references, not authorization credentials.
+- `Money` is `{ amount_minor int64, currency ISO-4217 }`; values of different currencies cannot be combined.
+- Physical-item quantity is a non-negative integer. Fractional inventory requires a future explicit unit policy.
+- Timestamps are UTC instants. Store timezone affects display and business scheduling only.
+- Mutable aggregates carry a version for optimistic concurrency where concurrent updates are meaningful.
+- Archive status or `archived_at` removes mutable records from normal use without deleting historical references.
 
-## Store aggregate
+## Platform administration
 
-- Store: identity, status, default currency, locale, timezone, and settings version.
-- Membership: user-to-store relationship and role assignments.
-- Role/Permission: store-scoped authorization.
+### Platform administrator
 
-Rules:
-
-- Suspended stores cannot accept new checkout operations.
-- Store default currency changes do not rewrite existing prices or orders.
-
-## Catalog aggregate
-
-- Product: store, name, slug, description, status, product type, and attributes.
-- Variant: SKU, option values, barcode, physical properties, and status.
-- Category: store-owned hierarchy/classification.
-- Media reference: metadata pointing to object storage.
+The initial platform administrator is a deployment-scoped principal authenticated by one configured bearer secret. It is not a database account and remains separate from store users and memberships.
 
 Rules:
 
-- Product slug and variant SKU are unique within a store.
-- Important query fields remain typed columns; optional product-type attributes may use validated JSON.
-- Publishing requires at least one sellable variant and valid required attributes.
+- Only the authenticated platform principal may create a SaaS tenant.
+- Tenant owners cannot satisfy a platform permission.
+- Provisioning creates the store, initial tenant user/password, owner membership, and platform-actor audit record atomically without issuing an owner session.
+- Individual operator accounts, platform sessions, activation, and suspension workflows are deferred.
 
-## Pricing aggregate
+## Store
 
-- PriceList: store, currency, channel/customer scope, validity window, priority.
-- Price: variant, amount, validity window.
-- Coupon/Promotion: constrained MVP discount definition and usage policy.
+### Store
+
+Fields include identity, immutable subdomain, name, status, VND default currency, `vi-VN` locale, `Asia/Ho_Chi_Minh` timezone, shipping settings, and settings version.
+
+### Membership
+
+A membership binds one tenant user to the same store and a fixed `owner`, `admin`, or `staff` role. Permissions are explicit and deny by default.
 
 Rules:
 
-- Money currencies cannot be combined without explicit conversion.
-- Price selection is deterministic when multiple lists match.
-- Checkout recomputes authoritative totals; client totals are never trusted.
+- At least one active owner must remain.
+- Owner and admin can confirm VietQR and initiate refunds by default.
+- Staff require explicit payment-confirmation and refund permissions.
+- Role or status changes are audited and concurrency-safe.
+- Store scope is selected before membership lookup.
 
-## Inventory aggregate
+## Identity
 
-- StockItem: store, variant, on-hand quantity, version.
-- Reservation: cart/order reference, quantity, status, expiration.
-- StockLedgerEntry: immutable reasoned adjustment.
+### User and credential
 
-Core relationship:
+A user, password credential, social identity, session, access token, and refresh token belong to one store. Email and social-provider subject uniqueness are per store.
+
+### Guest
+
+A guest and its rotating session belong to one active store and cannot satisfy workforce permissions.
+
+Rules:
+
+- The same person may create unrelated accounts at multiple stores.
+- Tokens are opaque, stored as digests, rotated on refresh, and rejected on another store host.
+- Refresh-token reuse revokes or marks the session compromised.
+- Disabled users and suspended stores cannot establish or refresh shopping sessions.
+- Guest order access is a separate opaque grant; possession of a guest session does not expose every order matching an email or phone.
+
+## Catalog
+
+### Product
+
+A product contains store, name, slug, description, status, category assignments, and media references. Status begins as `draft`, may become `published`, and ends as `archived`.
+
+### Variant
+
+A variant contains store, product, SKU, optional barcode, option values, weight, dimensions, status, and version. A product has at least one variant.
+
+### Category and media reference
+
+Categories provide a store-owned hierarchy. Media references point to object storage and contain ordering and accessibility metadata, not binary content.
+
+Rules:
+
+- Product slug and variant SKU are unique within a store, including archived records unless an explicit reuse policy is introduced.
+- Barcode uniqueness is store-scoped when present.
+- Weight and dimensions are non-negative and stored in documented base units.
+- Core query fields remain typed columns; validated JSON may hold optional option values and non-indexed attributes.
+- Publication requires a sellable active variant, valid required attributes, and at least one current price.
+- Archiving prevents new sale but never changes an order snapshot.
+
+## Pricing
+
+### Price list and price
+
+A price list defines store, VND currency, optional channel/customer scope, validity interval, priority, and status. A price assigns a non-negative amount to one variant.
+
+### Coupon
+
+The MVP coupon is either a fixed VND amount or percentage with explicit validity, minimum subtotal, total usage limit, optional per-customer limit, and maximum discount where applicable.
+
+Rules:
+
+- Price selection is deterministic by eligibility, priority, and stable tie-breaker.
+- Overlapping price lists that would remain ambiguous are rejected.
+- Checkout recalculates authoritative item prices and discounts; client totals are hints only.
+- Rounding occurs once at a documented component boundary using integer arithmetic.
+- Discounts cannot make a line or order component negative.
+- Storefront prices are VAT-inclusive for the first Vietnam-focused release; VAT invoice issuance is outside the MVP.
+
+## Inventory
+
+### Stock item
+
+One stock item exists for each active variant at the store's single logical stock location. It records on-hand quantity and version.
+
+### Reservation
+
+A reservation binds quantity to a cart checkout/order, expires ten minutes after successful checkout creation, and has `active`, `confirmed`, `released`, or `expired` status.
+
+### Stock ledger entry
+
+The ledger is an immutable record of receipt, manual adjustment, reservation confirmation, cancellation return, or refund-related restock. Each entry has a reason, actor or source, business reference, quantity delta, and resulting quantity where needed for audit.
 
 `available = on_hand - active_reserved`
 
 Rules:
 
-- Availability never becomes negative unless an explicit backorder policy permits it.
-- Reservation, confirmation, release, and expiry are idempotent.
-- Manual adjustments require a reason and audit record.
+- Available quantity cannot become negative; backorders are unsupported.
+- Reserve, confirm, release, and expire operations are atomic and idempotent.
+- Concurrent buyers cannot both reserve the last unit.
+- Reservation expiry uses database time semantics and a worker that safely claims bounded batches.
+- A late payment does not reactivate an expired reservation.
+- Manual adjustment requires a reason, permission, and audit record.
 
-## Cart aggregate
+## Customer
 
-- Cart: store, optional customer, currency, status, expiration.
-- CartLine: variant, requested quantity, and optional presentation snapshot.
-
-Rules:
-
-- A cart belongs to exactly one store and currency.
-- Cart totals are estimates; checkout calculates final authoritative totals.
-
-## Order aggregate
-
-- Order: store, customer reference, number, state, currency, totals, snapshots, and version.
-- OrderLine: variant reference plus immutable name, SKU, quantity, unit price, discounts, tax, and total snapshots.
-- OrderAddress: immutable billing/shipping snapshot.
-
-Initial states:
-
-`pending_payment -> paid -> processing -> shipped -> completed`
-
-Exceptional transitions include `cancelled`, `payment_failed`, and later `refunded` with explicit guards.
+A customer profile belongs to one store and may optionally reference a tenant user. Addresses are store-owned mutable records used to populate immutable order snapshots.
 
 Rules:
 
-- Order totals equal the sum of persisted components according to one documented rounding policy.
-- State transitions use optimistic concurrency or equivalent locking.
-- Catalog edits never modify order snapshots.
-- Order number uniqueness is store-scoped.
+- Guest checkout can create order contact/address snapshots without creating a registered user.
+- Email and phone are normalized for store-local lookup but are not authorization credentials.
+- A customer or address is archived rather than deleted when retained orders or financial records reference it.
+- APIs minimize personal data and require purpose-specific authorization.
 
-## Payment aggregate
+## Cart
 
-- Payment: store, order, provider, amount, currency, state.
-- PaymentAttempt: provider request/response references and idempotency key.
-- WebhookReceipt: provider event ID, signature validation result, processing state.
+A cart belongs to one store, one currency, and either a user or guest principal. Lines reference variants and requested integer quantities. States are `active`, `converted`, `expired`, and `abandoned`.
 
 Rules:
 
-- Provider event IDs and idempotency keys have appropriate unique constraints.
-- Duplicate callbacks return success after confirming prior processing.
-- A successful capture cannot silently exceed the authorized/order amount.
+- Cart ownership is immutable and store-bound.
+- A cart contains only variants from its store.
+- Cart totals are estimates and do not reserve stock.
+- Checkout idempotently converts a cart once and persists the resulting order relationship.
 
-## Relationships that require explicit policy later
+## Order
 
-- Guest checkout versus required customer account
-- Tax calculation source and rounding
-- Reservation expiry duration
-- Partial payment/refund/fulfillment
-- Multi-currency presentation and conversion
-- Product deletion/archival retention
-- Data retention and deletion obligations
+### Order and line snapshots
+
+An order contains store, public store-scoped order number, customer/guest relationship, currency, financial totals, contact and address snapshots, shipping snapshot, state, version, and timestamps. Each line persists variant reference plus name, SKU, selected options, quantity, unit price, discount, tax presentation, and total.
+
+### Guest order grant
+
+A guest order grant stores a digest, store, order, expiry/revocation state, and creation metadata. It permits only documented operations for that order.
+
+Order lifecycle:
+
+```text
+pending_payment -> paid -> processing -> shipped -> completed
+       |            |          |
+       +-> expired  +----------+-> cancellation_requested -> refund_pending -> cancelled
+       +-> cancelled
+```
+
+An implementation may use more internal states, but it must preserve these observable meanings.
+
+Rules:
+
+- Customers/guests may cancel only `pending_payment` orders they can access.
+- Authorized staff may cancel before shipment. Paid cancellation requires a full refund before terminal `cancelled` financial completion.
+- Invalid or concurrent transitions fail through a central state machine and version check.
+- Totals equal persisted components under one integer rounding policy.
+- Product, price, address, tax presentation, and shipping changes do not modify snapshots.
+- Order number supports customer communication but never grants access.
+
+## Payment
+
+### Provider configuration
+
+A store may enable VietQR, MoMo, or both. Configuration records provider, public settings, encrypted secret envelope, key version, status, and version. Reads redact secrets.
+
+### Payment and attempt
+
+A payment binds one order, amount, VND currency, provider, and state. An attempt records a store-scoped idempotency key, provider reference, request fingerprint, response classification, deadline, and lifecycle.
+
+### Webhook receipt and reconciliation item
+
+A webhook receipt stores provider event identity, body digest, validation result, processing state, and minimal redacted metadata. A reconciliation item explains late, mismatched, ambiguous, or manually observed funds and records resolution.
+
+Payment lifecycle:
+
+```text
+pending -> action_required -> succeeded
+   |             |              |
+   +-> failed    +-> expired    +-> refund_pending -> refunded
+                                  \-> reconciliation_required
+```
+
+Rules:
+
+- One successful payment cannot exceed or duplicate the order's payable total.
+- Store, order, amount, currency, merchant identity, and provider reference must agree before confirmation.
+- Provider event IDs and idempotency keys use tenant-aware unique constraints.
+- Duplicate callbacks acknowledge prior processing without duplicating effects.
+- VietQR generation produces `action_required`; only an authorized audited confirmation produces success.
+- MoMo success requires a verified provider response or raw-body signed webhook.
+- Late, wrong-amount, or wrong-reference funds enter reconciliation and do not restore expired commerce state automatically.
+
+## Refund
+
+A refund belongs to one successful payment and records the full refundable amount, reason, state, initiator, provider/external reference, and timestamps. MVP states are `pending`, `processing`, `succeeded`, `failed`, and `reconciliation_required`.
+
+Rules:
+
+- Only full refunds are supported initially.
+- Refund initiation is authorized, audited, idempotent, and cannot exceed captured funds less prior successful refunds.
+- MoMo refund execution uses the provider adapter with bounded retries and provider idempotency.
+- VietQR refund settlement occurs outside the system and requires an audited manual confirmation.
+- Order state changes only after the refund outcome required by its transition is durable.
+
+## Shipping
+
+A shipping rule provides free or flat-rate VND shipping. A shipment records order, status, carrier name, tracking number, and timestamps. Staff enter carrier and tracking information manually.
+
+Rules:
+
+- The checkout shipping charge and delivery address are snapshotted on the order.
+- A shipment belongs to one order and store.
+- Shipment cannot be marked shipped from a cancelled, expired, or unpaid order.
+- Automated carrier quotations, labels, and callbacks are outside the MVP.
+
+## Audit
+
+Audit records are append-only and contain store, actor type/identifier, action, subject, request/correlation ID, minimal structured metadata, and UTC occurrence time.
+
+Rules:
+
+- A required audit write participates in the same transaction as the privileged state change.
+- Audit metadata excludes credentials, token material, full provider bodies, and unnecessary personal data.
+- Corrections append a new record; existing records are not edited.
+
+## Cross-aggregate workflows
+
+- Tenant provisioning: Platform administration coordinates Stores, Identity, membership, and Audit in one transaction.
+- Checkout: Orders coordinates Carts, Catalog, Pricing, Inventory, Customers, Shipping, Payments, and outbox contracts in one transaction boundary where required.
+- Payment confirmation: Payments durably accepts one provider/manual result, then Orders and Inventory apply idempotent state changes under an explicit contract.
+- Cancellation/refund: Orders validates eligibility, Payments owns refund execution, Inventory owns release/restock, and Audit records privileged actions.
+
+Detailed table ownership and constraints are in [database design](database-design.md); integration facts are in the [event catalog](event-catalog.md).

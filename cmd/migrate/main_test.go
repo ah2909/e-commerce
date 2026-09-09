@@ -27,8 +27,10 @@ func TestRunRejectsUnsafeTestDatabaseBeforeConnecting(t *testing.T) {
 		"TEST_DATABASE_URL":            "postgres://user@production.example/ecommerce_test",
 		"ALLOW_TEST_DATABASE_MUTATION": "true",
 	}
-	err := run([]string{"test-up"}, func(key string) (string, bool) { value, ok := values[key]; return value, ok })
-	if err == nil || !strings.Contains(err.Error(), "host must be loopback") {
-		t.Fatalf("run() error = %v", err)
+	for _, command := range []string{"test-up", "test-reset"} {
+		err := run([]string{command}, func(key string) (string, bool) { value, ok := values[key]; return value, ok })
+		if err == nil || !strings.Contains(err.Error(), "host must be loopback") {
+			t.Fatalf("run(%s) error = %v", command, err)
+		}
 	}
 }

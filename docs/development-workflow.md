@@ -14,7 +14,7 @@ Read-only investigation and preparation of the task/plan may happen before appro
 
 ## Reusable stage commands
 
-These project-local skills are reusable prompt commands. Supply a task path after the command, for example `$ec-plan tasks/001-bootstrap.md`. Subsequent commands may omit the path when the active task is unambiguous.
+These project-local skills are reusable prompt commands. Supply an incomplete task path after the command, for example `$ec-plan tasks/005-correct-system-design-documentation.md`. Subsequent commands may omit the path when the active task is unambiguous.
 
 | Command | Work performed | Stop boundary |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Start Codex in this project and invoke `$ecommerce-delivery`, or ask it to imple
 
 GitHub Actions is the assumed CI provider. `.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatch. Its `Backend verification` job requires bootstrap artifacts, installs Go from `go.mod`, installs pinned tools through `make tools`, runs the five verification targets, and starts/stops disposable dependencies around integration tests.
 
-The backend job intentionally fails with a bootstrap explanation while `go.mod` or `Makefile` is missing. There are no placeholder passing tests or conditional skips for missing backend files. `tasks/001-bootstrap.md` owns the implementation of the Make targets, Compose dependencies, and test harness. This workflow setup does not implement that service task.
+The backend job fails with an actionable bootstrap explanation if `go.mod` or `Makefile` is missing. There are no placeholder passing tests or conditional skips for missing backend files. The completed [bootstrap task](../tasks/archive/001-bootstrap.md) records the Make targets, Compose dependencies, and test harness.
 
 The job uses a GitHub-hosted disposable runner, read-only repository permissions, checkout without persisted credentials, pinned action commits, and a bounded runtime. PR code runs under `pull_request`, without deployment secrets. CI runs backend checks; the local agents perform the independent reviews. CI does not authenticate or enforce the AI review verdicts.
 
