@@ -238,6 +238,8 @@ The security reviewer independently re-reviewed tenant authority, platform/user/
 
 On 2026-09-09, the user explicitly chose to skip both remaining medium findings for the initial MVP. No implementation change was made. The accepted risks are inconsistent credential lifetimes when API/database clocks drift and a narrow suspension/session-issuance race that can leave credentials usable after later store reactivation.
 
+On 2026-09-10, the user reaffirmed that both findings are skipped without scheduling a later Task 004 fix gate. This decision permits continued roadmap work and committing the current delivery, but it does not represent either finding as fixed or reviewer-approved.
+
 The findings remain documented and the independent review verdicts remain **changes required**; this workflow does not treat risk acceptance as a passed review. Final verification may still run and report useful evidence, but task 004 cannot be marked fully accepted under the current completion policy unless the findings are fixed and re-reviewed or the governing requirements/workflow are explicitly revised.
 
 ### Review coverage notes
@@ -310,13 +312,13 @@ This establishes the user-approved final verification evidence for the MVP artif
 
 ## Delivery record
 
-- Stage: MVP verification evidence consolidated; deferred review risks retained
+- Stage: MVP verification evidence consolidated; remaining review risks explicitly skipped
 - Active task: no; implementation work stopped by explicit user decision
 - Execution mode: stage-only
 - Last command: ec-review
-- Completed stage: revision 5 implementation, reviews and first fixes, explicit user risk deferral, Windows tool-bootstrap repair/re-review, and user-approved consolidation of final verification evidence
-- Pending gates: database-time and atomic store-suspension findings remain unresolved and prevent full workflow acceptance; no further task-004 work is currently requested
-- Next suggested command: ec-fix tasks/004-identity-authorization.md only if the deferred risks are reopened
+- Completed stage: revision 5 implementation, reviews and first fixes, explicit user risk acceptance, Windows tool-bootstrap repair/re-review, and user-approved consolidation of final verification evidence
+- Pending gates: database-time and atomic store-suspension findings remain unresolved and prevent full workflow acceptance; the user explicitly skipped both and no Task 004 gate is scheduled
+- Next suggested command: none; use ec-fix tasks/004-identity-authorization.md only if the risk decision is reversed
 - Plan revision and approval: revision 4 was approved and implemented but is superseded; the user approved revision 5 and invoked ec-build on 2026-09-08
 - Initial base: commit 76caad7783c8accd52fd031113c10c7d74373223 plus the existing uncommitted revision 4 and task 005 working tree
 - Revision 5 decision: use one configured deployment admin token and existing onboarding path; create owner credentials without owner session; defer platform accounts/invitations for speed
@@ -327,6 +329,6 @@ This establishes the user-approved final verification evidence for the MVP artif
 - Fix-stage evidence: focused unit tests passed for Identity application/PostgreSQL compilation, platform authentication/configuration, and Stores application/HTTP behavior. Migration status remained at version 2. Focused real PostgreSQL tests passed for active refresh concurrency, disabled-user concurrent refresh/revocation/reactivation, and stale social-session admission after user disablement or store suspension. `gofmt -l` on all affected Go files and `git diff --check` passed; `make -pn APP_ENV=production` showed an empty `PLATFORM_ADMIN_TOKEN`, confirming no Make default. The first sandboxed unit-test attempt could not use the host Go cache; rerunning with the workspace cache passed. The first disabled-refresh regression expected ordinary unauthenticated after reactivation but observed the safe replay classification; the corrected invariant test passed and confirmed no successor token row. Disposable dependencies were stopped and the generated workspace Go cache was removed after testing.
 - Architect re-review: changes required on 2026-09-09; all prior architecture findings were confirmed resolved, but database-authoritative credential expiry remains a medium blocker.
 - Security re-review: changes required on 2026-09-09; four prior findings and current-user admission were confirmed resolved, but atomic store suspension versus session issuance remains a medium blocker.
-- User risk decision: on 2026-09-09 the user explicitly deferred both remaining medium findings for the initial MVP; neither finding is represented as fixed or reviewer-approved
+- User risk decision: on 2026-09-10 the user reaffirmed that both remaining medium findings are skipped with no later fix gate scheduled; neither finding is represented as fixed or reviewer-approved
 - Bootstrap re-review: architect and security reviewers independently passed the Makefile and test-only fixes on 2026-09-09 with no new findings; their overall task verdicts remain changes required solely because of the two deferred medium risks
 - Final evidence: user-approved consolidated verification passed on 2026-09-09 using the successful full unit/integration results plus post-fix formatting, lint, vulnerability, and focused-package results; the two deferred review findings still prevent full workflow acceptance

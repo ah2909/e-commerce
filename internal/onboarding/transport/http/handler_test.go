@@ -13,6 +13,7 @@ import (
 	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
 	"github.com/ah2909/e-commerce/internal/platform/adminauth"
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
+	"github.com/gin-gonic/gin"
 )
 
 type recordingLimiter struct{ calls int }
@@ -27,9 +28,9 @@ func TestPlatformAuthenticationPrecedesProvisioningWork(t *testing.T) {
 	copy(token[:], []byte("dev-platform-admin-token-0000000"))
 	limiter := &recordingLimiter{}
 	handler := NewHandler(onboardingapplication.Service{}, limiter, slog.New(slog.DiscardHandler), time.Second, 10, time.Hour)
-	mux := http.NewServeMux()
+	mux := gin.New()
 	hosts := tenant.NewHostMiddleware(nil, "example.test", "auth.example.test", slog.New(slog.DiscardHandler), time.Second)
-	handler.Register(mux, hosts, adminauth.New(token).Authenticate)
+	handler.Register(mux, hosts, adminauth.New(token).AuthenticateGin())
 
 	for _, authorization := range []string{"", "Bearer tenant-user-token"} {
 		request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/onboarding/stores", strings.NewReader("not-json"))

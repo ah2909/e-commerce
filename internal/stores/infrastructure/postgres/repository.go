@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -10,174 +11,175 @@ import (
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 )
 
 type Repository struct {
-	pool  *pgxpool.Pool
+	db    *gorm.DB
 	audit AuditWriter
 }
 
 type AuditWriter interface {
-	Insert(context.Context, pgx.Tx, auditdomain.Record) error
+	Insert(context.Context, *gorm.DB, auditdomain.Record) error
 }
 
-func NewRepository(pool *pgxpool.Pool, audit AuditWriter) *Repository {
-	return &Repository{pool: pool, audit: audit}
+func NewRepository(db *gorm.DB, audit AuditWriter) *Repository {
+	return &Repository{db: db, audit: audit}
 }
+
+type storeRow struct {
+	StoreID         string    `gorm:"column:store_id;type:uuid;primaryKey"`
+	Subdomain       string    `gorm:"column:subdomain"`
+	Name            string    `gorm:"column:name"`
+	Status          string    `gorm:"column:status"`
+	DefaultCurrency string    `gorm:"column:default_currency"`
+	Locale          string    `gorm:"column:locale"`
+	Timezone        string    `gorm:"column:timezone"`
+	SettingsVersion int64     `gorm:"column:settings_version"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at"`
+}
+
+func (storeRow) TableName() string { return "stores" }
+
+type membershipRow struct {
+	StoreID   string    `gorm:"column:store_id;type:uuid;primaryKey"`
+	UserID    string    `gorm:"column:user_id;type:uuid;primaryKey"`
+	Status    string    `gorm:"column:status"`
+	Role      string    `gorm:"column:role"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (membershipRow) TableName() string { return "store_memberships" }
 
 func (repository *Repository) IsActive(ctx context.Context, storeID ids.StoreID) (bool, error) {
-	var active bool
-	err := repository.pool.QueryRow(ctx, `SELECT status = 'active' FROM stores WHERE store_id = $1::uuid`, storeID.String()).Scan(&active)
-	if errors.Is(err, pgx.ErrNoRows) {
+	var row storeRow
+	err := repository.db.WithContext(ctx).Select("status").Where("store_id = ?", storeID.String()).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("query active store: %w", err)
 	}
-	return active, nil
+	return row.Status == string(domain.StoreStatusActive), nil
 }
 
-func (repository *Repository) InsertStore(ctx context.Context, tx pgx.Tx, store domain.Store) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO stores (
-			store_id, subdomain, name, status, default_currency, locale, timezone,
-			settings_version, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		store.ID().String(), store.Subdomain(), store.Name(), store.Status(), store.DefaultCurrency(),
-		store.Locale(), store.Timezone(), store.SettingsVersion(), store.CreatedAt(), store.UpdatedAt())
-	if err != nil {
+func (repository *Repository) InsertStore(ctx context.Context, tx *gorm.DB, store domain.Store) error {
+	row := storeRow{StoreID: store.ID().String(), Subdomain: store.Subdomain().String(), Name: store.Name(), Status: string(store.Status()), DefaultCurrency: store.DefaultCurrency(), Locale: store.Locale(), Timezone: store.Timezone(), SettingsVersion: store.SettingsVersion(), CreatedAt: store.CreatedAt(), UpdatedAt: store.UpdatedAt()}
+	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
 		return fmt.Errorf("insert store: %w", err)
 	}
 	return nil
 }
 
-func (repository *Repository) InsertMembership(ctx context.Context, tx pgx.Tx, membership domain.Membership) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO store_memberships (store_id, user_id, status, role, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
-		membership.StoreID().String(), membership.UserID().String(), membership.Status(), membership.Role(),
-		membership.CreatedAt(), membership.UpdatedAt())
-	if err != nil {
+func (repository *Repository) InsertMembership(ctx context.Context, tx *gorm.DB, membership domain.Membership) error {
+	row := membershipRow{StoreID: membership.StoreID().String(), UserID: membership.UserID().String(), Status: string(membership.Status()), Role: string(membership.Role()), CreatedAt: membership.CreatedAt(), UpdatedAt: membership.UpdatedAt()}
+	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
 		return fmt.Errorf("insert store membership: %w", err)
 	}
 	return nil
 }
 
-func (repository *Repository) InsertStoreCreatedAudit(ctx context.Context, tx pgx.Tx, store domain.Store, actorID, requestID string) error {
+func (repository *Repository) InsertStoreCreatedAudit(ctx context.Context, tx *gorm.DB, store domain.Store, actorID, requestID string) error {
 	return repository.insertAudit(ctx, tx, store.ID(), auditdomain.ActorPlatformAdmin, actorID, "store.created", "store", store.ID().String(), requestID, store.CreatedAt())
 }
 
 func (repository *Repository) ResolveStoreBySubdomain(ctx context.Context, subdomain domain.Subdomain) (application.StoreRecord, bool, error) {
-	var idText string
-	var record application.StoreRecord
-	err := repository.pool.QueryRow(ctx, `SELECT store_id::text,subdomain,name,status,default_currency,locale,timezone,settings_version FROM stores WHERE subdomain=$1`, subdomain.String()).Scan(&idText, &record.Subdomain, &record.Name, &record.Status, &record.DefaultCurrency, &record.Locale, &record.Timezone, &record.SettingsVersion)
-	if errors.Is(err, pgx.ErrNoRows) {
+	var row storeRow
+	err := repository.db.WithContext(ctx).Where("subdomain = ?", subdomain.String()).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return application.StoreRecord{}, false, nil
 	}
 	if err != nil {
 		return application.StoreRecord{}, false, fmt.Errorf("query store by subdomain: %w", err)
 	}
-	storeID, err := ids.ParseStoreID(idText)
+	storeID, err := ids.ParseStoreID(row.StoreID)
 	if err != nil {
 		return application.StoreRecord{}, false, fmt.Errorf("restore store ID: %w", err)
 	}
-	record.StoreID = storeID
-	return record, true, nil
+	return application.StoreRecord{StoreID: storeID, Subdomain: domain.Subdomain(row.Subdomain), Name: row.Name, Status: domain.StoreStatus(row.Status), DefaultCurrency: row.DefaultCurrency, Locale: row.Locale, Timezone: row.Timezone, SettingsVersion: row.SettingsVersion}, true, nil
 }
 
 func (repository *Repository) ListMemberships(ctx context.Context, storeID ids.StoreID) ([]domain.Membership, error) {
-	rows, err := repository.pool.Query(ctx, `SELECT user_id::text,status,role,created_at,updated_at FROM store_memberships WHERE store_id=$1::uuid ORDER BY created_at,user_id`, storeID.String())
-	if err != nil {
+	var rows []membershipRow
+	if err := repository.db.WithContext(ctx).Where("store_id = ?", storeID.String()).Order("created_at,user_id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list store memberships: %w", err)
 	}
-	defer rows.Close()
-	memberships := make([]domain.Membership, 0)
-	for rows.Next() {
-		var userIDText string
-		var status domain.MembershipStatus
-		var role domain.Role
-		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&userIDText, &status, &role, &createdAt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("scan store membership: %w", err)
-		}
-		userID, err := ids.ParseUserID(userIDText)
+	memberships := make([]domain.Membership, 0, len(rows))
+	for _, row := range rows {
+		userID, err := ids.ParseUserID(row.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("restore membership user ID: %w", err)
 		}
-		membership, err := domain.RestoreMembershipWithRole(storeID, userID, status, role, createdAt, updatedAt)
+		membership, err := domain.RestoreMembershipWithRole(storeID, userID, domain.MembershipStatus(row.Status), domain.Role(row.Role), row.CreatedAt, row.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("restore membership: %w", err)
 		}
 		memberships = append(memberships, membership)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list store memberships: %w", err)
-	}
 	return memberships, nil
 }
 
 func (repository *Repository) CreateMembership(ctx context.Context, membership domain.Membership, actorID ids.UserID, requestID string) error {
-	err := pgx.BeginFunc(ctx, repository.pool, func(tx pgx.Tx) error {
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockOwner(ctx, tx, membership.StoreID(), actorID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO store_memberships (store_id,user_id,status,role,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6)`, membership.StoreID().String(), membership.UserID().String(), membership.Status(), membership.Role(), membership.CreatedAt(), membership.UpdatedAt())
-		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		row := membershipRow{StoreID: membership.StoreID().String(), UserID: membership.UserID().String(), Status: string(membership.Status()), Role: string(membership.Role()), CreatedAt: membership.CreatedAt(), UpdatedAt: membership.UpdatedAt()}
+		if err := tx.Create(&row).Error; err != nil {
+			if sqlState(err) == "23505" {
 				return application.ErrMembershipTarget
 			}
 			return fmt.Errorf("insert membership: %w", err)
 		}
 		return repository.insertAudit(ctx, tx, membership.StoreID(), auditdomain.ActorUser, actorID.String(), "membership.created", "membership", membership.UserID().String(), requestID, membership.CreatedAt())
 	})
-	return err
 }
 
 func (repository *Repository) UpdateMembership(ctx context.Context, storeID ids.StoreID, userID ids.UserID, role domain.Role, status domain.MembershipStatus, actorID ids.UserID, requestID string, now time.Time) (domain.Membership, error) {
 	var updated domain.Membership
-	err := pgx.BeginFunc(ctx, repository.pool, func(tx pgx.Tx) error {
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockOwner(ctx, tx, storeID, actorID); err != nil {
 			return err
 		}
-		var currentStatus domain.MembershipStatus
-		var currentRole domain.Role
-		var createdAt time.Time
-		err := tx.QueryRow(ctx, `SELECT status,role,created_at FROM store_memberships WHERE store_id=$1::uuid AND user_id=$2::uuid FOR UPDATE`, storeID.String(), userID.String()).Scan(&currentStatus, &currentRole, &createdAt)
-		if errors.Is(err, pgx.ErrNoRows) {
+		var current membershipRow
+		err := tx.Raw(`SELECT store_id::text,user_id::text,status,role,created_at,updated_at FROM store_memberships WHERE store_id=?::uuid AND user_id=?::uuid FOR UPDATE`, storeID.String(), userID.String()).Row().Scan(&current.StoreID, &current.UserID, &current.Status, &current.Role, &current.CreatedAt, &current.UpdatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
 			return application.ErrMembershipTarget
 		}
 		if err != nil {
 			return fmt.Errorf("lock membership: %w", err)
 		}
-		if currentStatus == domain.MembershipStatusActive && currentRole == domain.RoleOwner && (status != domain.MembershipStatusActive || role != domain.RoleOwner) {
-			var otherOwners int
-			if err := tx.QueryRow(ctx, `SELECT count(*) FROM store_memberships WHERE store_id=$1::uuid AND user_id<>$2::uuid AND status='active' AND role='owner'`, storeID.String(), userID.String()).Scan(&otherOwners); err != nil {
+		if current.Status == string(domain.MembershipStatusActive) && current.Role == string(domain.RoleOwner) && (status != domain.MembershipStatusActive || role != domain.RoleOwner) {
+			var otherOwners int64
+			if err := tx.Raw(`SELECT count(*) FROM store_memberships WHERE store_id=?::uuid AND user_id<>?::uuid AND status='active' AND role='owner'`, storeID.String(), userID.String()).Scan(&otherOwners).Error; err != nil {
 				return fmt.Errorf("count active owners: %w", err)
 			}
 			if otherOwners == 0 {
 				return application.ErrLastOwner
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE store_memberships SET status=$3,role=$4,updated_at=$5 WHERE store_id=$1::uuid AND user_id=$2::uuid`, storeID.String(), userID.String(), status, role, now); err != nil {
-			return fmt.Errorf("update membership: %w", err)
+		result := tx.Model(&membershipRow{}).Where("store_id = ? AND user_id = ?", storeID.String(), userID.String()).Updates(map[string]any{"status": string(status), "role": string(role), "updated_at": now})
+		if result.Error != nil {
+			return fmt.Errorf("update membership: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return application.ErrMembershipTarget
 		}
 		if err := repository.insertAudit(ctx, tx, storeID, auditdomain.ActorUser, actorID.String(), "membership.updated", "membership", userID.String(), requestID, now); err != nil {
 			return err
 		}
-		updated, err = domain.RestoreMembershipWithRole(storeID, userID, status, role, createdAt, now)
+		updated, err = domain.RestoreMembershipWithRole(storeID, userID, status, role, current.CreatedAt, now)
 		return err
 	})
 	return updated, err
 }
 
-func lockOwner(ctx context.Context, tx pgx.Tx, storeID ids.StoreID, actorID ids.UserID) error {
+func lockOwner(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, actorID ids.UserID) error {
 	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM store_memberships WHERE store_id=$1::uuid AND user_id=$2::uuid AND status='active' AND role='owner') FROM stores WHERE store_id=$1::uuid FOR UPDATE`, storeID.String(), actorID.String()).Scan(&allowed)
-	if errors.Is(err, pgx.ErrNoRows) || !allowed {
+	err := tx.WithContext(ctx).Raw(`SELECT EXISTS (SELECT 1 FROM store_memberships WHERE store_id=?::uuid AND user_id=?::uuid AND status='active' AND role='owner') FROM stores WHERE store_id=?::uuid FOR UPDATE`, storeID.String(), actorID.String(), storeID.String()).Row().Scan(&allowed)
+	if errors.Is(err, sql.ErrNoRows) || !allowed {
 		return application.ErrTenantAccessDenied
 	}
 	if err != nil {
@@ -186,7 +188,7 @@ func lockOwner(ctx context.Context, tx pgx.Tx, storeID ids.StoreID, actorID ids.
 	return nil
 }
 
-func (repository *Repository) insertAudit(ctx context.Context, tx pgx.Tx, storeID ids.StoreID, actorType auditdomain.ActorType, actorID, action, subjectType, subjectID, requestID string, occurredAt time.Time) error {
+func (repository *Repository) insertAudit(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, actorType auditdomain.ActorType, actorID, action, subjectType, subjectID, requestID string, occurredAt time.Time) error {
 	if repository.audit == nil {
 		return errors.New("audit writer is required")
 	}
@@ -198,24 +200,10 @@ func (repository *Repository) insertAudit(ctx context.Context, tx pgx.Tx, storeI
 }
 
 func (repository *Repository) ResolveTenant(ctx context.Context, storeID ids.StoreID, userID ids.UserID) (application.TenantRecord, bool, error) {
-	row := repository.pool.QueryRow(ctx, `
-		SELECT
-			s.store_id::text, m.user_id::text, s.subdomain, s.name, s.status, m.status, m.role,
-			s.default_currency, s.locale, s.timezone, s.settings_version
-		FROM store_memberships AS m
-		JOIN stores AS s ON s.store_id = m.store_id
-		WHERE m.store_id = $1::uuid AND m.user_id = $2::uuid`,
-		storeID.String(), userID.String())
-	var (
-		storeIDText string
-		userIDText  string
-		record      application.TenantRecord
-	)
-	err := row.Scan(
-		&storeIDText, &userIDText, &record.Subdomain, &record.StoreName, &record.StoreStatus, &record.MembershipStatus, &record.Role,
-		&record.DefaultCurrency, &record.Locale, &record.Timezone, &record.SettingsVersion,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
+	var storeIDText, userIDText string
+	var record application.TenantRecord
+	err := repository.db.WithContext(ctx).Raw(`SELECT s.store_id::text,m.user_id::text,s.subdomain,s.name,s.status,m.status,m.role,s.default_currency,s.locale,s.timezone,s.settings_version FROM store_memberships m JOIN stores s ON s.store_id=m.store_id WHERE m.store_id=?::uuid AND m.user_id=?::uuid`, storeID.String(), userID.String()).Row().Scan(&storeIDText, &userIDText, &record.Subdomain, &record.StoreName, &record.StoreStatus, &record.MembershipStatus, &record.Role, &record.DefaultCurrency, &record.Locale, &record.Timezone, &record.SettingsVersion)
+	if errors.Is(err, sql.ErrNoRows) {
 		return application.TenantRecord{}, false, nil
 	}
 	if err != nil {
@@ -229,7 +217,16 @@ func (repository *Repository) ResolveTenant(ctx context.Context, storeID ids.Sto
 	if err != nil {
 		return application.TenantRecord{}, false, fmt.Errorf("restore tenant user ID: %w", err)
 	}
-	record.StoreID = resolvedStoreID
-	record.UserID = resolvedUserID
+	record.StoreID, record.UserID = resolvedStoreID, resolvedUserID
 	return record, true, nil
+}
+
+type stateError interface{ SQLState() string }
+
+func sqlState(err error) string {
+	var state stateError
+	if errors.As(err, &state) {
+		return state.SQLState()
+	}
+	return ""
 }

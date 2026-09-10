@@ -18,6 +18,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -36,14 +37,15 @@ func NewPair(tb testing.TB, pool *pgxpool.Pool) Pair {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	tb.Cleanup(cancel)
 	now := time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC)
-	stores := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
-	identity := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(tb, pool)
+	stores := storepostgres.NewRepository(db, auditpostgres.NewWriter())
+	identity := identitypostgres.NewRepository(db)
 	hasher, err := identitypassword.NewArgon2ID(1)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	identityService := identityapplication.NewService(identity, hasher, stores, token.Generator{}, identityapplication.DefaultSessionSettings(), func() time.Time { return now })
-	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, stores, identity), identityService, ids.NewStoreID, func() time.Time { return now })
+	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(db, stores, identity), identityService, ids.NewStoreID, func() time.Time { return now })
 	created := make([]Store, 0, 2)
 	tb.Cleanup(func() { cleanupStores(tb, pool, created) })
 	pair, fixtures, err := buildPair(func() (Store, error) {

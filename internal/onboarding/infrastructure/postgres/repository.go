@@ -8,36 +8,34 @@ import (
 	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
 	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
 	storesdomain "github.com/ah2909/e-commerce/internal/stores/domain"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
 )
 
 type Repository struct {
-	pool     *pgxpool.Pool
+	db       *gorm.DB
 	stores   StoreWriter
 	identity IdentityWriter
 }
 
 type StoreWriter interface {
-	InsertStore(context.Context, pgx.Tx, storesdomain.Store) error
-	InsertMembership(context.Context, pgx.Tx, storesdomain.Membership) error
-	InsertStoreCreatedAudit(context.Context, pgx.Tx, storesdomain.Store, string, string) error
+	InsertStore(context.Context, *gorm.DB, storesdomain.Store) error
+	InsertMembership(context.Context, *gorm.DB, storesdomain.Membership) error
+	InsertStoreCreatedAudit(context.Context, *gorm.DB, storesdomain.Store, string, string) error
 }
 
 type IdentityWriter interface {
-	InsertAccount(context.Context, pgx.Tx, identityapplication.PreparedAccount) error
+	InsertAccount(context.Context, *gorm.DB, identityapplication.PreparedAccount) error
 }
 
-func NewRepository(pool *pgxpool.Pool, stores StoreWriter, identity IdentityWriter) *Repository {
-	return &Repository{pool: pool, stores: stores, identity: identity}
+func NewRepository(db *gorm.DB, stores StoreWriter, identity IdentityWriter) *Repository {
+	return &Repository{db: db, stores: stores, identity: identity}
 }
 
 func (repository *Repository) Create(ctx context.Context, store storesdomain.Store, membership storesdomain.Membership, account identityapplication.PreparedAccount, platformActorID, requestID string) error {
 	if store.ID() != membership.StoreID() || store.ID() != account.User.StoreID || membership.UserID() != account.User.ID || platformActorID == "" {
 		return errors.New("onboarding scope mismatch")
 	}
-	err := pgx.BeginFunc(ctx, repository.pool, func(tx pgx.Tx) error {
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := repository.stores.InsertStore(ctx, tx, store); err != nil {
 			return err
 		}
@@ -49,12 +47,21 @@ func (repository *Repository) Create(ctx context.Context, store storesdomain.Sto
 		}
 		return repository.stores.InsertStoreCreatedAudit(ctx, tx, store, platformActorID, requestID)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	if sqlState(err) == "23505" {
 		return onboardingapplication.ErrOnboardingConflict
 	}
 	if err != nil {
 		return fmt.Errorf("onboarding transaction: %w", err)
 	}
 	return nil
+}
+
+type stateError interface{ SQLState() string }
+
+func sqlState(err error) string {
+	var state stateError
+	if errors.As(err, &state) {
+		return state.SQLState()
+	}
+	return ""
 }

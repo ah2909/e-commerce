@@ -35,17 +35,19 @@ import (
 	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	storeshttp "github.com/ah2909/e-commerce/internal/stores/transport/http"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
 func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	pool := integrationPool(t)
+	db := gormtest.FromPool(t, pool)
 	redisClient := redis.NewClient(&redis.Options{Addr: os.Getenv("REDIS_ADDRESS")})
 	t.Cleanup(func() { _ = redisClient.Close() })
 	logger := slog.New(slog.DiscardHandler)
-	stores := storespostgres.NewRepository(pool, auditpostgres.NewWriter())
-	identities := identitypostgres.NewRepository(pool)
+	stores := storespostgres.NewRepository(db, auditpostgres.NewWriter())
+	identities := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
 	identityService := identityapplication.NewService(identities, hasher, stores, token.Generator{}, identityapplication.DefaultSessionSettings(), time.Now)
 	social := identityapplication.NewSocialService(identities, identityService, redisstore.NewSocial(redisClient, time.Second), map[identitydomain.Provider]identityapplication.SocialProvider{}, []string{"/auth/complete"}, identityapplication.DefaultSocialSettings(), time.Now)
@@ -54,16 +56,16 @@ func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	settings.AuthHost = "auth.example.test"
 	identityHandler := identityhttp.NewHandler(identityService, social, ratelimit.NewRedis(redisClient, time.Second), logger, settings)
 	hosts := tenant.NewHostMiddleware(storesapplication.NewResolveStore(stores), "example.test", "auth.example.test", logger, time.Second)
-	mux := http.NewServeMux()
+	mux := httpserver.NewEngine(logger)
 	identityHandler.Register(mux, hosts)
-	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, stores, identities), identityService, ids.NewStoreID, time.Now)
+	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(db, stores, identities), identityService, ids.NewStoreID, time.Now)
 	var platformToken [32]byte
 	copy(platformToken[:], []byte("dev-platform-admin-token-0000000"))
-	onboardinghttp.NewHandler(onboarding, ratelimit.NewRedis(redisClient, time.Second), logger, time.Second, 20, time.Minute).Register(mux, hosts, adminauth.New(platformToken).Authenticate)
+	onboardinghttp.NewHandler(onboarding, ratelimit.NewRedis(redisClient, time.Second), logger, time.Second, 20, time.Minute).Register(mux, hosts, adminauth.New(platformToken).AuthenticateGin())
 	memberships := storesapplication.NewMembershipManager(stores, identities, time.Now)
 	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(stores), logger, time.Second)
-	storeshttp.NewHandler(memberships, identityHandler.AuthenticateUser, tenantMiddleware, logger).Register(mux, hosts)
-	server := httpserver.Middleware(logger, mux)
+	storeshttp.NewHandler(memberships, identityHandler.AuthenticateUser(), tenantMiddleware, logger).Register(mux, hosts)
+	server := http.Handler(mux)
 
 	suffix := time.Now().UnixNano()
 	email := fmt.Sprintf("http-%d@example.com", suffix)
@@ -83,6 +85,12 @@ func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	crossUser := request(t, server, http.MethodGet, "/api/v1/store", nil, storeA.AccessToken, storeB.Subdomain+".example.test")
 	if viewA.Code != http.StatusOK || crossUser.Code != http.StatusUnauthorized {
 		t.Fatalf("user host scope statuses = same %d, cross %d", viewA.Code, crossUser.Code)
+	}
+	headUser := request(t, server, http.MethodHead, "/api/v1/store", nil, storeA.AccessToken, storeA.Subdomain+".example.test")
+	headAnonymous := request(t, server, http.MethodHead, "/api/v1/store", nil, "", storeA.Subdomain+".example.test")
+	wrongMethod := request(t, server, http.MethodPut, "/api/v1/store", nil, "", storeA.Subdomain+".example.test")
+	if headUser.Code != http.StatusOK || headAnonymous.Code != http.StatusUnauthorized || wrongMethod.Code != http.StatusMethodNotAllowed || wrongMethod.Header().Get("Allow") != "GET, HEAD" {
+		t.Fatalf("HEAD compatibility = authenticated %d, anonymous %d, wrong method %d Allow %q", headUser.Code, headAnonymous.Code, wrongMethod.Code, wrongMethod.Header().Get("Allow"))
 	}
 
 	guest := request(t, server, http.MethodPost, "/api/v1/guest-sessions", nil, "", storeA.Subdomain+".example.test")

@@ -39,10 +39,11 @@ func (spy *membershipDirectorySpy) IsActiveUser(context.Context, ids.StoreID, id
 
 func TestUpdateMembershipRejectsMalformedUserID(t *testing.T) {
 	handler := Handler{}
+	engine := httpserver.NewEngine(slog.New(slog.DiscardHandler))
+	engine.PATCH("/api/v1/memberships/:user_id", handler.updateMembership)
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPatch, "/api/v1/memberships/not-a-uuid", strings.NewReader(`{"role":"staff","status":"active"}`))
-	request.SetPathValue("user_id", "not-a-uuid")
 	response := httptest.NewRecorder()
-	handler.updateMembership(response, request)
+	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"membership_unavailable"`) {
 		t.Fatalf("response = %d %s", response.Code, response.Body.String())
 	}
@@ -53,10 +54,11 @@ func TestAddMembershipRejectsMalformedUserIDWithoutDependencies(t *testing.T) {
 	directory := &membershipDirectorySpy{}
 	manager := application.NewMembershipManager(repository, directory, time.Now)
 	handler := Handler{memberships: manager, logger: slog.New(slog.DiscardHandler)}
-	wrapped := httpserver.Middleware(handler.logger, http.HandlerFunc(handler.addMembership))
+	engine := httpserver.NewEngine(handler.logger)
+	engine.POST("/api/v1/memberships", handler.addMembership)
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/memberships", strings.NewReader(`{"user_id":"not-a-uuid","role":"staff"}`))
 	response := httptest.NewRecorder()
-	wrapped.ServeHTTP(response, request)
+	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"membership_unavailable"`) {
 		t.Fatalf("response = %d %s", response.Code, response.Body.String())
 	}

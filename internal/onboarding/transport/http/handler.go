@@ -20,6 +20,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/problem"
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
 	storesdomain "github.com/ah2909/e-commerce/internal/stores/domain"
+	"github.com/gin-gonic/gin"
 )
 
 const maxBody = 16 << 10
@@ -41,19 +42,21 @@ func NewHandler(service onboardingapplication.Service, limiter Limiter, logger *
 	return Handler{service: service, limiter: limiter, logger: logger, timeout: timeout, maximum: maximum, window: window}
 }
 
-func (handler Handler) Register(mux *http.ServeMux, hosts tenant.HostMiddleware, authenticate func(http.Handler) http.Handler) {
-	mux.Handle("POST /api/v1/onboarding/stores", hosts.Base(authenticate(handler.withTimeout(http.HandlerFunc(handler.create)))))
+func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware, authenticate gin.HandlerFunc) {
+	router.POST("/api/v1/onboarding/stores", hosts.BaseGin(), authenticate, handler.withTimeout(), handler.create)
 }
 
-func (handler Handler) withTimeout(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), handler.timeout)
+func (handler Handler) withTimeout() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		ctx, cancel := context.WithTimeout(request.Request.Context(), handler.timeout)
 		defer cancel()
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		request.Request = request.Request.WithContext(ctx)
+		request.Next()
+	}
 }
 
-func (handler Handler) create(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) create(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	allowed, retry, err := handler.limiter.Allow(r.Context(), "onboarding-peer", clientaddr.FromRequest(r), handler.maximum, handler.window)
 	if err != nil {
 		problem.Write(w, r, http.StatusServiceUnavailable, "rate_limit_unavailable", "Request protection is unavailable.", map[string]any{"retryable": true})

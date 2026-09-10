@@ -19,6 +19,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,10 +27,11 @@ import (
 func TestUserSessionRotationReplayAndLogout(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), func() time.Time { return now })
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), func() time.Time { return now })
 	registered, err := service.Register(context.Background(), pair.A.Store.ID(), "session-test@example.com", "correct-horse-battery-staple")
 	if err != nil {
 		t.Fatal(err)
@@ -65,9 +67,10 @@ func TestUserSessionRotationReplayAndLogout(t *testing.T) {
 func TestConcurrentUserRefreshCreatesOnlyOneSuccessor(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
 	registered, err := service.Register(context.Background(), pair.A.Store.ID(), "concurrent-refresh@example.com", "correct-horse-battery-staple")
 	if err != nil {
 		t.Fatal(err)
@@ -94,9 +97,10 @@ func TestConcurrentUserRefreshCreatesOnlyOneSuccessor(t *testing.T) {
 func TestDisabledUserRefreshRevokesFamilyAcrossReactivation(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
 	registered, err := service.Register(context.Background(), pair.A.Store.ID(), "disabled-refresh@example.com", "correct-horse-battery-staple")
 	if err != nil {
 		t.Fatal(err)
@@ -140,9 +144,10 @@ func TestDisabledUserRefreshRevokesFamilyAcrossReactivation(t *testing.T) {
 func TestSocialExchangeSessionAdmissionUsesCurrentUserAndStoreStatus(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
 	staleUser := application.UserRecord{StoreID: pair.A.Store.ID(), ID: pair.A.UserID, Status: identitydomain.UserStatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	var sessionsBefore int
 	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM identity_sessions WHERE store_id=$1::uuid AND user_id=$2::uuid`, pair.A.Store.ID().String(), pair.A.UserID.String()).Scan(&sessionsBefore); err != nil {
@@ -172,9 +177,10 @@ func TestSocialExchangeSessionAdmissionUsesCurrentUserAndStoreStatus(t *testing.
 func TestGuestTokensCannotCrossStoreScope(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
 	guest, err := service.CreateGuest(context.Background(), pair.A.Store.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -239,9 +245,10 @@ func TestGuestTokensCannotCrossStoreScope(t *testing.T) {
 func TestConcurrentGuestRefreshCreatesOnlyOneSuccessor(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(t, pool)
+	repository := identitypostgres.NewRepository(db)
 	hasher, _ := password.NewArgon2ID(1)
-	service := application.NewService(repository, hasher, storepostgres.NewRepository(pool, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
+	service := application.NewService(repository, hasher, storepostgres.NewRepository(db, auditpostgres.NewWriter()), token.Generator{}, application.DefaultSessionSettings(), time.Now)
 	guest, err := service.CreateGuest(context.Background(), pair.A.Store.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +291,7 @@ func assertOneRefreshSuccessAndReplay(t *testing.T, errorsByCall []error) {
 func TestConcurrentFirstSocialLoginResolvesOneUser(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	repository := identitypostgres.NewRepository(gormtest.FromPool(t, pool))
 	newIDs := make([]ids.UserID, 2)
 	for index := range newIDs {
 		newIDs[index], _ = ids.NewUserID()
@@ -324,7 +331,7 @@ func TestConcurrentFirstSocialLoginResolvesOneUser(t *testing.T) {
 func TestSameSocialSubjectResolvesIndependentUsersAcrossStores(t *testing.T) {
 	pool := integrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	repository := identitypostgres.NewRepository(pool)
+	repository := identitypostgres.NewRepository(gormtest.FromPool(t, pool))
 	subject := "shared-google-subject"
 	firstID, _ := ids.NewUserID()
 	secondID, _ := ids.NewUserID()

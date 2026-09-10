@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -77,6 +79,51 @@ func Middleware(logger *slog.Logger, next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r.WithContext(ctx))
 	})
+}
+
+func NewEngine(logger *slog.Logger) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
+	_ = engine.SetTrustedProxies(nil)
+	engine.HandleMethodNotAllowed = true
+	engine.RedirectTrailingSlash = false
+	engine.RedirectFixedPath = false
+	engine.Use(ginRequestMiddleware(logger))
+	engine.NoRoute(func(ctx *gin.Context) {
+		writeRouteProblem(ctx, http.StatusNotFound, "route_not_found", "Route was not found.")
+	})
+	engine.NoMethod(func(ctx *gin.Context) {
+		writeRouteProblem(ctx, http.StatusMethodNotAllowed, "method_not_allowed", "Method is not allowed.")
+	})
+	return engine
+}
+
+func ginRequestMiddleware(logger *slog.Logger) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		requestID := ctx.GetHeader(requestIDHeader)
+		if !requestIDPattern.MatchString(requestID) {
+			requestID = newRequestID()
+		}
+		ctx.Header(requestIDHeader, requestID)
+		ctx.Request = ctx.Request.WithContext(context.WithValue(ctx.Request.Context(), requestIDKey, requestID))
+		started := time.Now()
+		defer func() {
+			if recover() != nil {
+				logger.Error("request panic recovered", "request_id", requestID)
+				if !ctx.Writer.Written() {
+					ctx.JSON(http.StatusInternalServerError, map[string]string{"status": "internal_error"})
+				}
+				ctx.Abort()
+			}
+			logger.Info("request completed", "request_id", requestID, "method", ctx.Request.Method, "path", ctx.Request.URL.Path, "status", ctx.Writer.Status(), "duration_ms", time.Since(started).Milliseconds())
+		}()
+		ctx.Next()
+	}
+}
+
+func writeRouteProblem(ctx *gin.Context, status int, code, message string) {
+	ctx.Header("Content-Type", "application/problem+json")
+	ctx.JSON(status, map[string]any{"code": code, "message": message, "details": map[string]any{}, "request_id": RequestID(ctx.Request.Context())})
 }
 
 func RequestID(ctx context.Context) string {

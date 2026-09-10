@@ -2,12 +2,14 @@
 
 ## Snapshot
 
-- Assessed: 2026-09-09
-- Implemented baseline: commit `a78d970c7e8658faa42ac9c998567d822d6bee4d`, plus the current task 005 documentation-fix working tree
+- Assessed: 2026-09-10
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus the current task 007 Gin/GORM migration working tree
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
 This is the authoritative current-state summary. Detailed historical evidence remains in [task records](../tasks/README.md). A feature is complete only when its approved acceptance criteria, independent architecture/security reviews, and final verification pass on the same relevant artifacts.
+
+Task 007 migrated production API routing and transport middleware to Gin and production repositories and cross-module transactions to GORM without changing Goose schema version 2. Independent architecture and security reviews passed after compatibility and hardening corrections, and final verification passed on 2026-09-10.
 
 ## Status meanings
 
@@ -23,10 +25,10 @@ This is the authoritative current-state summary. Detailed historical evidence re
 
 | Slice | Status | Evidence and gap |
 | --- | --- | --- |
-| Foundation | Implemented and accepted | API/worker entry points, configuration, logging, health checks, Compose dependencies, migration runner, CI, Make verification targets, and guarded integration database are recorded complete in [task 001](../tasks/archive/001-bootstrap.md). Current working-tree checks are recorded below. |
-| Tenant context | Implemented, changes required | Store persistence, tenant middleware, and the task 003 isolation baseline exist. Task 004 changed host and session behavior; re-review completed with the two deferred medium findings below. Current routing implements shared-base-domain subdomains, not the target customer-managed exact-host single-store mode. |
-| Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed, but the store-suspension/session race keeps the shared security boundary unaccepted. |
-| Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission remain explicitly deferred. |
+| Foundation | Implemented and accepted | API/worker entry points, configuration, logging, health checks, Compose dependencies, migration runner, CI, Make verification targets, and guarded integration database are recorded complete in [task 001](../tasks/archive/001-bootstrap.md). Native Gin transport and GORM persistence adapters are accepted in [task 007](../tasks/archive/007-adopt-gin-gorm-project-wide.md). |
+| Tenant context | Implemented, changes required | Store persistence, tenant middleware, and the task 003 isolation baseline exist. Task 004 changed host and session behavior; its two remaining medium findings are explicitly skipped and retained as accepted risks below. Current routing implements shared-base-domain subdomains, not the target customer-managed exact-host single-store mode. |
+| Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed; the store-suspension/session race remains an explicitly accepted risk. |
+| Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission are explicitly accepted unresolved risks. |
 | Catalog | Not started | No Catalog module or catalog schema exists. |
 | Pricing and coupons | Not started | No Money value object, Pricing module, price/coupon schema, or contract exists. |
 | Inventory | Not started | No stock item, reservation, ledger, expiry worker, or concurrency implementation exists. |
@@ -55,11 +57,11 @@ This is the authoritative current-state summary. Detailed historical evidence re
 
 The schema intentionally does not include platform operators. It also does not include Catalog, Pricing, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, outbox, or inbox tables.
 
-## Current acceptance blockers
+## Current accepted risks and release blockers
 
 Task 004 revision 5 implements the corrections requested by the prior reviews and the latest finding fixes: explicit platform-token injection, disabled-user refresh-family revocation, current-state social session admission, non-enumerating malformed membership handling, and bounded unauthenticated base64url parsing.
 
-Independent architecture and security re-review completed with changes required. On 2026-09-09, the user explicitly deferred two medium findings for the initial MVP: API-clock-based credential expiry can diverge under clock skew, and store suspension is not atomic with session issuance. On the same date, the user elected to skip further task 004 work for now. The findings remain unresolved and prevent full task acceptance or production use. Residual validation also remains for live Google/Facebook interoperability, real ingress proxy configuration, customer-managed exact-host routing, production-size migration locking, race-enabled CI, and production secret rotation.
+Independent architecture and security re-review completed with changes required. The two remaining medium findings are API-clock-based credential expiry under clock skew and non-atomic store suspension versus session issuance. On 2026-09-10, the user explicitly reaffirmed that both are skipped with no later Task 004 fix gate scheduled. They remain unresolved, keep Task 004 unaccepted under the workflow, and are knowingly accepted for continued roadmap work. Residual release validation also remains for live Google/Facebook interoperability, real ingress proxy configuration, customer-managed exact-host routing, production-size migration locking, race-enabled CI, and production secret rotation.
 
 ## Alignment that is already present
 
@@ -108,10 +110,10 @@ Task 004 fix-stage evidence on 2026-09-09: focused unit packages passed; migrati
 
 Task 004 consolidated MVP verification on 2026-09-09: full unit and integration suites passed before a tooling-only Makefile change and logger-only test cleanup; afterward, formatting, zero-issue lint, vulnerability scanning with no called-code vulnerabilities, and the affected Stores HTTP package test passed. Both reviewers approved the later changes, and the user approved reusing the unaffected full-suite evidence instead of repeating integration tests. Verification is accepted for continued MVP development, while the two deferred findings still prevent full workflow acceptance.
 
+Task 007 final verification on 2026-09-10: `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 2, and vulnerability scanning. The initial final scan exposed reachable `GO-2026-5676` in Gin's transitive QUIC dependency; `quic-go v0.59.1` and `qpack v0.6.0` cleared it, and both independent reviewers approved the final module graph. The clean scan reported zero vulnerabilities in called code or imported packages.
+
 ## Required next work
 
-1. Fix and re-review task 005 documentation standardization, then run its final documentation checks.
-2. Begin Catalog with task 004 explicitly treated as unaccepted and deferred.
-3. Before production, reopen task 004 to address database-authoritative expiry and atomic suspension/session admission.
+1. Begin Catalog with Task 004 treated as unaccepted and its two unresolved findings explicitly accepted and skipped.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

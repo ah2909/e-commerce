@@ -24,10 +24,12 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"gorm.io/gorm"
 )
 
 func TestOnboardingAtomicallyCreatesTenantOwnerWithoutSession(t *testing.T) {
@@ -161,20 +163,21 @@ func TestOnboardingRollsBackEveryModuleWhenAuditFails(t *testing.T) {
 
 type failingAudit struct{}
 
-func (failingAudit) Insert(context.Context, pgx.Tx, auditdomain.Record) error {
+func (failingAudit) Insert(context.Context, *gorm.DB, auditdomain.Record) error {
 	return errors.New("forced audit failure")
 }
 
 func onboardingService(tb testing.TB, pool *pgxpool.Pool, audit storespostgres.AuditWriter) onboardingapplication.Service {
 	tb.Helper()
-	stores := storespostgres.NewRepository(pool, audit)
-	identity := identitypostgres.NewRepository(pool)
+	db := gormtest.FromPool(tb, pool)
+	stores := storespostgres.NewRepository(db, audit)
+	identity := identitypostgres.NewRepository(db)
 	hasher, err := identitypassword.NewArgon2ID(4)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	identityService := identityapplication.NewService(identity, hasher, stores, token.Generator{}, identityapplication.DefaultSessionSettings(), time.Now)
-	return onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, stores, identity), identityService, ids.NewStoreID, time.Now)
+	return onboardingapplication.NewService(onboardingpostgres.NewRepository(db, stores, identity), identityService, ids.NewStoreID, time.Now)
 }
 
 func uniqueSubdomain(tb testing.TB, prefix string) string {

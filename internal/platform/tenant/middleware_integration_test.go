@@ -20,6 +20,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -27,7 +28,7 @@ import (
 func TestMiddlewareDeniesCrossStoreThroughPostgres(t *testing.T) {
 	pool := tenantIntegrationPool(t)
 	pair := storefixture.NewPair(t, pool)
-	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool, auditpostgres.NewWriter()))
+	resolver := application.NewResolveTenant(storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter()))
 	logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
 	called := 0
 	middleware := NewMiddleware(resolver, logger, 500*time.Millisecond)
@@ -90,7 +91,7 @@ func TestMiddlewareTimesOutBlockedPostgresResolution(t *testing.T) {
 	if _, err := lock.Exec(context.Background(), `LOCK TABLE store_memberships IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatalf("lock memberships: %v", err)
 	}
-	resolver := application.NewResolveTenant(storepostgres.NewRepository(pool, auditpostgres.NewWriter()))
+	resolver := application.NewResolveTenant(storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter()))
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	middleware := NewMiddleware(resolver, logger, 25*time.Millisecond)

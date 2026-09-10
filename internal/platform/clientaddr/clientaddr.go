@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -28,6 +30,14 @@ func (resolver Resolver) Middleware(next http.Handler) http.Handler {
 		address := resolver.resolve(r)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, address.String())))
 	})
+}
+
+func (resolver Resolver) GinMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		address := resolver.resolve(ctx.Request)
+		ctx.Request = ctx.Request.WithContext(context.WithValue(ctx.Request.Context(), contextKey{}, address.String()))
+		ctx.Next()
+	}
 }
 
 func FromRequest(r *http.Request) string {

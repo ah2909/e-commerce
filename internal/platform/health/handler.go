@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Dependency struct {
@@ -39,26 +41,29 @@ func New(dependencies []Dependency, timeout time.Duration) *Handler {
 	return &Handler{dependencies: cloned, timeout: timeout}
 }
 
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("/health/live", h.live)
-	mux.HandleFunc("/health/ready", h.ready)
+func (h *Handler) Register(router gin.IRoutes) {
+	for _, path := range []string{"/health/live", "/health/ready"} {
+		for _, method := range []string{http.MethodConnect, http.MethodDelete, http.MethodHead, http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace} {
+			router.Handle(method, path, h.methodNotAllowed)
+		}
+	}
+	router.GET("/health/live", h.live)
+	router.GET("/health/ready", h.ready)
 }
 
-func (h *Handler) live(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeMethodNotAllowed(w)
-		return
-	}
-	writeJSON(w, http.StatusOK, response{Status: "ok"})
+func (h *Handler) live(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, response{Status: "ok"})
 }
 
-func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeMethodNotAllowed(w)
-		return
-	}
+func (h *Handler) methodNotAllowed(ctx *gin.Context) {
+	ctx.Header("Allow", http.MethodGet)
+	ctx.Header("Content-Type", "application/json")
+	ctx.Status(http.StatusMethodNotAllowed)
+	_ = json.NewEncoder(ctx.Writer).Encode(response{Status: "method_not_allowed"})
+}
 
-	ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
+func (h *Handler) ready(request *gin.Context) {
+	ctx, cancel := context.WithTimeout(request.Request.Context(), h.timeout)
 	defer cancel()
 
 	results := make([]checkResult, len(h.dependencies))
@@ -83,25 +88,14 @@ func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
 				ready = false
 			}
 		case <-ctx.Done():
-			writeJSON(w, http.StatusServiceUnavailable, response{Status: "not_ready", Checks: results})
+			request.JSON(http.StatusServiceUnavailable, response{Status: "not_ready", Checks: results})
 			return
 		}
 	}
 
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, response{Status: "not_ready", Checks: results})
+		request.JSON(http.StatusServiceUnavailable, response{Status: "not_ready", Checks: results})
 		return
 	}
-	writeJSON(w, http.StatusOK, response{Status: "ready", Checks: results})
-}
-
-func writeMethodNotAllowed(w http.ResponseWriter) {
-	w.Header().Set("Allow", http.MethodGet)
-	writeJSON(w, http.StatusMethodNotAllowed, response{Status: "method_not_allowed"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body response) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	request.JSON(http.StatusOK, response{Status: "ready", Checks: results})
 }

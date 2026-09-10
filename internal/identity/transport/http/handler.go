@@ -25,6 +25,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	storesdomain "github.com/ah2909/e-commerce/internal/stores/domain"
+	"github.com/gin-gonic/gin"
 )
 
 const maxBody = 16 << 10
@@ -81,37 +82,45 @@ func NewHandler(service application.Service, social application.SocialService, l
 	return Handler{service: service, social: social, limiter: limiter, logger: logger, settings: settings}
 }
 
-func (handler Handler) Register(mux *http.ServeMux, hosts tenant.HostMiddleware) {
-	tenantRoute := func(next http.Handler) http.Handler { return hosts.Tenant(handler.withTimeout(next)) }
-	mux.Handle("POST /api/v1/auth/registrations", tenantRoute(http.HandlerFunc(handler.register)))
-	mux.Handle("POST /api/v1/auth/sessions", tenantRoute(http.HandlerFunc(handler.login)))
-	mux.Handle("POST /api/v1/auth/sessions/refresh", tenantRoute(http.HandlerFunc(handler.refreshUser)))
-	mux.Handle("GET /api/v1/auth/me", tenantRoute(handler.authenticateUser(http.HandlerFunc(handler.me))))
-	mux.Handle("DELETE /api/v1/auth/sessions/current", tenantRoute(http.HandlerFunc(handler.logoutUser)))
-	mux.Handle("POST /api/v1/auth/social/{provider}/sessions", tenantRoute(http.HandlerFunc(handler.startSocial)))
-	mux.Handle("POST /api/v1/auth/social/{provider}/links", tenantRoute(handler.authenticateUser(http.HandlerFunc(handler.startSocialLink))))
-	mux.Handle("GET /api/v1/auth/social/continue", hosts.Auth(handler.withTimeout(http.HandlerFunc(handler.continueSocial))))
-	mux.Handle("GET /api/v1/auth/social/{provider}/callback", hosts.Auth(handler.withTimeout(http.HandlerFunc(handler.socialCallback))))
-	mux.Handle("POST /api/v1/auth/social/exchanges", tenantRoute(http.HandlerFunc(handler.socialExchange)))
-	mux.Handle("POST /api/v1/guest-sessions", tenantRoute(http.HandlerFunc(handler.createGuest)))
-	mux.Handle("POST /api/v1/guest-sessions/refresh", tenantRoute(http.HandlerFunc(handler.refreshGuest)))
-	mux.Handle("GET /api/v1/guest-sessions/current", tenantRoute(handler.authenticateGuest(http.HandlerFunc(handler.currentGuest))))
-	mux.Handle("DELETE /api/v1/guest-sessions/current", tenantRoute(http.HandlerFunc(handler.logoutGuest)))
+func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware) {
+	tenantMiddleware := hosts.TenantGin()
+	timeout := handler.withTimeout()
+	userAuth := handler.authenticateUser()
+	guestAuth := handler.authenticateGuest()
+	router.POST("/api/v1/auth/registrations", tenantMiddleware, timeout, handler.register)
+	router.POST("/api/v1/auth/sessions", tenantMiddleware, timeout, handler.login)
+	router.POST("/api/v1/auth/sessions/refresh", tenantMiddleware, timeout, handler.refreshUser)
+	registerGet(router, "/api/v1/auth/me", tenantMiddleware, timeout, userAuth, handler.me)
+	router.DELETE("/api/v1/auth/sessions/current", tenantMiddleware, timeout, handler.logoutUser)
+	router.POST("/api/v1/auth/social/:provider/sessions", tenantMiddleware, timeout, handler.startSocial)
+	router.POST("/api/v1/auth/social/:provider/links", tenantMiddleware, timeout, userAuth, handler.startSocialLink)
+	registerGet(router, "/api/v1/auth/social/continue", hosts.AuthGin(), timeout, handler.continueSocial)
+	registerGet(router, "/api/v1/auth/social/:provider/callback", hosts.AuthGin(), timeout, handler.socialCallback)
+	router.POST("/api/v1/auth/social/exchanges", tenantMiddleware, timeout, handler.socialExchange)
+	router.POST("/api/v1/guest-sessions", tenantMiddleware, timeout, handler.createGuest)
+	router.POST("/api/v1/guest-sessions/refresh", tenantMiddleware, timeout, handler.refreshGuest)
+	registerGet(router, "/api/v1/guest-sessions/current", tenantMiddleware, timeout, guestAuth, handler.currentGuest)
+	router.DELETE("/api/v1/guest-sessions/current", tenantMiddleware, timeout, handler.logoutGuest)
 }
 
-func (handler Handler) withTimeout(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), handler.settings.OperationTimeout)
+func registerGet(router gin.IRoutes, path string, handlers ...gin.HandlerFunc) {
+	router.GET(path, handlers...)
+	router.HEAD(path, handlers...)
+}
+
+func (handler Handler) withTimeout() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		ctx, cancel := context.WithTimeout(request.Request.Context(), handler.settings.OperationTimeout)
 		defer cancel()
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		request.Request = request.Request.WithContext(ctx)
+		request.Next()
+	}
 }
 
-func (handler Handler) AuthenticateUser(next http.Handler) http.Handler {
-	return handler.authenticateUser(next)
-}
+func (handler Handler) AuthenticateUser() gin.HandlerFunc { return handler.authenticateUser() }
 
-func (handler Handler) register(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) register(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	var body struct {
 		Email    string `json:"email"`
@@ -143,7 +152,8 @@ func (handler Handler) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, sessionResponse(result))
 }
 
-func (handler Handler) login(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) login(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	var body struct {
 		Email    string `json:"email"`
@@ -164,7 +174,8 @@ func (handler Handler) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessionResponse(result))
 }
 
-func (handler Handler) refreshUser(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) refreshUser(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	var body struct {
 		RefreshToken string `json:"refresh_token"`
@@ -184,7 +195,8 @@ func (handler Handler) refreshUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokenResponse(pair))
 }
 
-func (handler Handler) logoutUser(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) logoutUser(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	value, ok := bearer(r)
 	if !ok {
@@ -198,7 +210,8 @@ func (handler Handler) logoutUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (handler Handler) me(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) me(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	user := r.Context().Value(userKey{}).(application.UserRecord)
 	var email *string
 	if user.Email != nil {
@@ -208,20 +221,22 @@ func (handler Handler) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"store_id": user.StoreID.String(), "user_id": user.ID.String(), "email": email, "status": user.Status, "created_at": user.CreatedAt, "updated_at": user.UpdatedAt})
 }
 
-func (handler Handler) startSocial(w http.ResponseWriter, r *http.Request) {
-	handler.startSocialFlow(w, r, "login", "", "")
+func (handler Handler) startSocial(ctx *gin.Context) {
+	handler.startSocialFlow(ctx, "login", "", "")
 }
-func (handler Handler) startSocialLink(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) startSocialLink(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	principal, _ := authn.FromContext(r.Context())
 	userID, err := ids.ParseUserID(principal.UserID())
 	if err != nil {
 		handler.authError(w, r, application.ErrUnauthenticated)
 		return
 	}
-	handler.startSocialFlow(w, r, "link", userID, principal.SessionID())
+	handler.startSocialFlow(ctx, "link", userID, principal.SessionID())
 }
 
-func (handler Handler) startSocialFlow(w http.ResponseWriter, r *http.Request, purpose string, userID ids.UserID, sessionID string) {
+func (handler Handler) startSocialFlow(ctx *gin.Context, purpose string, userID ids.UserID, sessionID string) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	var body struct {
 		ReturnPath string `json:"return_path"`
@@ -230,10 +245,10 @@ func (handler Handler) startSocialFlow(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	policy := handler.settings.Social
-	if !handler.limitCredential(w, r, "social-start", store.StoreID.String()+"|"+r.PathValue("provider"), policy.PeerMaximum, policy.IdentityMaximum, policy.Window) {
+	if !handler.limitCredential(w, r, "social-start", store.StoreID.String()+"|"+ctx.Param("provider"), policy.PeerMaximum, policy.IdentityMaximum, policy.Window) {
 		return
 	}
-	provider, err := identitydomain.ParseProvider(r.PathValue("provider"))
+	provider, err := identitydomain.ParseProvider(ctx.Param("provider"))
 	if err != nil {
 		problem.Write(w, r, http.StatusNotFound, "provider_unavailable", "Social provider is unavailable.", nil)
 		return
@@ -251,7 +266,8 @@ func (handler Handler) startSocialFlow(w http.ResponseWriter, r *http.Request, p
 	writeJSON(w, http.StatusOK, map[string]string{"authorization_url": continuation})
 }
 
-func (handler Handler) continueSocial(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) continueSocial(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	if len(r.URL.Query()["code"]) != 1 {
 		problem.Write(w, r, http.StatusUnauthorized, "social_state_invalid", "Social login state is invalid.", nil)
 		return
@@ -265,7 +281,8 @@ func (handler Handler) continueSocial(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, continuation.AuthorizationURL, http.StatusSeeOther)
 }
 
-func (handler Handler) socialCallback(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) socialCallback(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	query := r.URL.Query()
 	hasCode := len(query["code"]) == 1 && query.Get("code") != ""
 	hasError := len(query["error"]) == 1 && query.Get("error") != ""
@@ -273,7 +290,7 @@ func (handler Handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 		problem.Write(w, r, http.StatusUnauthorized, "social_state_invalid", "Social login state is invalid.", nil)
 		return
 	}
-	provider, err := identitydomain.ParseProvider(r.PathValue("provider"))
+	provider, err := identitydomain.ParseProvider(ctx.Param("provider"))
 	cookie, cookieErr := r.Cookie("social_binding")
 	if err != nil || cookieErr != nil {
 		problem.Write(w, r, http.StatusUnauthorized, "social_state_invalid", "Social login state is invalid.", nil)
@@ -320,7 +337,8 @@ func (handler Handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusSeeOther)
 }
 
-func (handler Handler) socialExchange(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) socialExchange(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	var body struct {
 		ExchangeCode string `json:"exchange_code"`
@@ -340,7 +358,8 @@ func (handler Handler) socialExchange(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessionResponse(result))
 }
 
-func (handler Handler) createGuest(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) createGuest(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	storeID := store.StoreID
 	if !handler.limitPeerPolicy(w, r, "guest-create", handler.settings.GuestCreation) {
@@ -361,7 +380,8 @@ func (handler Handler) createGuest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, response)
 }
 
-func (handler Handler) refreshGuest(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) refreshGuest(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	storeID := store.StoreID
 	var body struct {
@@ -382,12 +402,14 @@ func (handler Handler) refreshGuest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokenResponse(pair))
 }
 
-func (handler Handler) currentGuest(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) currentGuest(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	guest := r.Context().Value(guestKey{}).(application.GuestSession)
 	writeJSON(w, http.StatusOK, map[string]any{"guest_id": guest.GuestID.String(), "store_id": guest.StoreID.String(), "session_id": guest.Token.SessionID, "access_expires_at": guest.Token.AccessExpiresAt, "session_expires_at": guest.Token.SessionExpiresAt})
 }
 
-func (handler Handler) logoutGuest(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) logoutGuest(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	store, _ := tenant.StoreFromContext(r.Context())
 	storeID := store.StoreID
 	value, ok := bearer(r)
@@ -402,47 +424,56 @@ func (handler Handler) logoutGuest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (handler Handler) authenticateUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) authenticateUser() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		w, r := request.Writer, request.Request
 		value, ok := bearer(r)
 		if !ok {
 			handler.authError(w, r, application.ErrUnauthenticated)
+			request.Abort()
 			return
 		}
 		store, hasStore := tenant.StoreFromContext(r.Context())
 		if !hasStore {
 			handler.authError(w, r, application.ErrUnauthenticated)
+			request.Abort()
 			return
 		}
 		user, sessionID, err := handler.service.AuthenticateUser(r.Context(), store.StoreID, value)
 		if err != nil {
 			handler.authError(w, r, err)
+			request.Abort()
 			return
 		}
-		ctx := context.WithValue(r.Context(), userKey{}, user)
-		ctx = authn.WithPrincipal(ctx, authn.NewUserPrincipal(store.StoreID.String(), user.ID.String(), sessionID))
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		requestContext := context.WithValue(r.Context(), userKey{}, user)
+		requestContext = authn.WithPrincipal(requestContext, authn.NewUserPrincipal(store.StoreID.String(), user.ID.String(), sessionID))
+		request.Request = r.WithContext(requestContext)
+		request.Next()
+	}
 }
 
-func (handler Handler) authenticateGuest(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) authenticateGuest() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		w, r := request.Writer, request.Request
 		store, hasStore := tenant.StoreFromContext(r.Context())
 		storeID := store.StoreID
 		value, ok := bearer(r)
 		if !hasStore || !ok {
 			handler.authError(w, r, application.ErrUnauthenticated)
+			request.Abort()
 			return
 		}
 		guest, err := handler.service.AuthenticateGuest(r.Context(), storeID, value)
 		if err != nil {
 			handler.guestError(w, r, err)
+			request.Abort()
 			return
 		}
-		ctx := context.WithValue(r.Context(), guestKey{}, guest)
-		ctx = authn.WithPrincipal(ctx, authn.NewGuestPrincipal(storeID.String(), guest.GuestID.String(), guest.Token.SessionID))
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		requestContext := context.WithValue(r.Context(), guestKey{}, guest)
+		requestContext = authn.WithPrincipal(requestContext, authn.NewGuestPrincipal(storeID.String(), guest.GuestID.String(), guest.Token.SessionID))
+		request.Request = r.WithContext(requestContext)
+		request.Next()
+	}
 }
 
 func (handler Handler) guestError(w http.ResponseWriter, r *http.Request, err error) {

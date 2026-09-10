@@ -17,19 +17,20 @@ import (
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
+	"github.com/gin-gonic/gin"
 )
 
 const maxBody = 16 << 10
 
 type Handler struct {
 	memberships  application.MembershipManager
-	authenticate func(http.Handler) http.Handler
+	authenticate gin.HandlerFunc
 	tenant       tenant.Middleware
 	logger       *slog.Logger
 	timeout      time.Duration
 }
 
-func NewHandler(memberships application.MembershipManager, authenticate func(http.Handler) http.Handler, tenantMiddleware tenant.Middleware, logger *slog.Logger, operationTimeout ...time.Duration) Handler {
+func NewHandler(memberships application.MembershipManager, authenticate gin.HandlerFunc, tenantMiddleware tenant.Middleware, logger *slog.Logger, operationTimeout ...time.Duration) Handler {
 	timeout := 2 * time.Second
 	if len(operationTimeout) == 1 && operationTimeout[0] > 0 {
 		timeout = operationTimeout[0]
@@ -37,32 +38,36 @@ func NewHandler(memberships application.MembershipManager, authenticate func(htt
 	return Handler{memberships: memberships, authenticate: authenticate, tenant: tenantMiddleware, logger: logger, timeout: timeout}
 }
 
-func (handler Handler) Register(mux *http.ServeMux, hosts tenant.HostMiddleware) {
-	mux.Handle("GET /api/v1/store", hosts.Tenant(handler.memberRoute(domain.PermissionStoreView, http.HandlerFunc(handler.getStore))))
-	mux.Handle("GET /api/v1/memberships", hosts.Tenant(handler.memberRoute(domain.PermissionMembershipsView, http.HandlerFunc(handler.listMemberships))))
-	mux.Handle("POST /api/v1/memberships", hosts.Tenant(handler.memberRoute(domain.PermissionMembershipsManage, http.HandlerFunc(handler.addMembership))))
-	mux.Handle("PATCH /api/v1/memberships/{user_id}", hosts.Tenant(handler.memberRoute(domain.PermissionMembershipsManage, http.HandlerFunc(handler.updateMembership))))
+func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware) {
+	registerGet(router, "/api/v1/store", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionStoreView, handler.logger), handler.getStore)
+	registerGet(router, "/api/v1/memberships", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionMembershipsView, handler.logger), handler.listMemberships)
+	router.POST("/api/v1/memberships", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionMembershipsManage, handler.logger), handler.addMembership)
+	router.PATCH("/api/v1/memberships/:user_id", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionMembershipsManage, handler.logger), handler.updateMembership)
 }
 
-func (handler Handler) memberRoute(permission domain.Permission, next http.Handler) http.Handler {
-	return handler.withTimeout(handler.authenticate(handler.tenant.Wrap(authz.Require(permission, handler.logger, next))))
+func registerGet(router gin.IRoutes, path string, handlers ...gin.HandlerFunc) {
+	router.GET(path, handlers...)
+	router.HEAD(path, handlers...)
 }
 
-func (handler Handler) withTimeout(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), handler.timeout)
+func (handler Handler) withTimeout() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		ctx, cancel := context.WithTimeout(request.Request.Context(), handler.timeout)
 		defer cancel()
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		request.Request = request.Request.WithContext(ctx)
+		request.Next()
+	}
 }
 
-func (handler Handler) getStore(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) getStore(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	resolved, _ := tenant.FromContext(r.Context())
 	store, _ := tenant.StoreFromContext(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"store_id": resolved.StoreID().String(), "subdomain": store.Subdomain.String(), "name": resolved.StoreName(), "status": resolved.StoreStatus(), "default_currency": resolved.DefaultCurrency(), "locale": resolved.Locale(), "timezone": resolved.Timezone(), "settings_version": resolved.SettingsVersion(), "role": resolved.Role()})
 }
 
-func (handler Handler) listMemberships(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) listMemberships(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	resolved, _ := tenant.FromContext(r.Context())
 	memberships, err := handler.memberships.List(r.Context(), resolved.StoreID())
 	if err != nil {
@@ -76,7 +81,8 @@ func (handler Handler) listMemberships(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"memberships": items})
 }
 
-func (handler Handler) addMembership(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) addMembership(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	var body struct {
 		UserID string `json:"user_id"`
 		Role   string `json:"role"`
@@ -93,7 +99,8 @@ func (handler Handler) addMembership(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, membershipResponse(membership))
 }
 
-func (handler Handler) updateMembership(w http.ResponseWriter, r *http.Request) {
+func (handler Handler) updateMembership(ctx *gin.Context) {
+	w, r := ctx.Writer, ctx.Request
 	var body struct {
 		Role   string `json:"role"`
 		Status string `json:"status"`
@@ -101,7 +108,7 @@ func (handler Handler) updateMembership(w http.ResponseWriter, r *http.Request) 
 	if !decode(w, r, &body) {
 		return
 	}
-	targetID, err := ids.ParseUserID(r.PathValue("user_id"))
+	targetID, err := ids.ParseUserID(ctx.Param("user_id"))
 	if err != nil {
 		problem.Write(w, r, http.StatusNotFound, "membership_unavailable", "Membership is unavailable.", nil)
 		return

@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestLiveness(t *testing.T) {
 	handler := New(nil, time.Second)
-	mux := http.NewServeMux()
+	mux := gin.New()
 	handler.Register(mux)
 
 	response := httptest.NewRecorder()
@@ -38,7 +40,7 @@ func TestReadiness(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			handler := New([]Dependency{{Name: "database", Check: test.check}}, 10*time.Millisecond)
-			mux := http.NewServeMux()
+			mux := gin.New()
 			handler.Register(mux)
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil))
@@ -55,12 +57,13 @@ func TestReadiness(t *testing.T) {
 
 func TestHealthRejectsOtherMethods(t *testing.T) {
 	handler := New(nil, time.Second)
-	mux := http.NewServeMux()
+	mux := gin.New()
+	mux.HandleMethodNotAllowed = true
 	handler.Register(mux)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/health/live", nil))
 
-	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
-		t.Fatalf("method response = %d, Allow=%q", response.Code, response.Header().Get("Allow"))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet || response.Header().Get("Content-Type") != "application/json" || response.Body.String() != "{\"status\":\"method_not_allowed\"}\n" {
+		t.Fatalf("method response = %d, headers=%v, body=%q", response.Code, response.Header(), response.Body.String())
 	}
 }

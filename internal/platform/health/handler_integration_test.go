@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,7 +32,7 @@ func TestReadinessWithRealDependencies(t *testing.T) {
 		{Name: "postgresql", Check: pool.Ping},
 		{Name: "redis", Check: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	}, 5*time.Second)
-	mux := http.NewServeMux()
+	mux := gin.New()
 	handler.Register(mux)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil))
@@ -58,7 +59,7 @@ func TestReadinessWithClosedRedis(t *testing.T) {
 		{Name: "postgresql", Check: pool.Ping},
 		{Name: "redis", Check: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	}, 5*time.Second)
-	mux := http.NewServeMux()
+	mux := gin.New()
 	handler.Register(mux)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health/ready", nil))

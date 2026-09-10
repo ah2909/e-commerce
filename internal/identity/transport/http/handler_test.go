@@ -16,6 +16,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
 	storesdomain "github.com/ah2909/e-commerce/internal/stores/domain"
+	"github.com/gin-gonic/gin"
 )
 
 type hostResolverStub struct{}
@@ -78,7 +79,7 @@ func TestCredentialEndpointFailsClosedWhenLimiterIsUnavailable(t *testing.T) {
 	var logs strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	handler := NewHandler(application.Service{}, application.SocialService{}, limiterStub{err: errors.New("redis unavailable")}, logger, DefaultSettings())
-	mux := http.NewServeMux()
+	mux := gin.New()
 	handler.Register(mux, testHosts(logger))
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/registrations", strings.NewReader(`{"email":"private@example.com","password":"valid-password-value"}`))
 	request.Host = "shop.example.test"
@@ -97,7 +98,7 @@ func TestCredentialLimitsUseIndependentPeerAndIdentityPolicies(t *testing.T) {
 	settings := DefaultSettings()
 	settings.Login = CredentialRatePolicy{PeerMaximum: 11, IdentityMaximum: 3, Window: 7 * time.Minute}
 	handler := NewHandler(application.Service{}, application.SocialService{}, limiter, slog.Default(), settings)
-	mux := http.NewServeMux()
+	mux := gin.New()
 	handler.Register(mux, testHosts(slog.Default()))
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions", strings.NewReader(`{"email":"Person@Example.com","password":"valid-password-value"}`))
 	request.Host = "shop.example.test"
@@ -128,7 +129,7 @@ func TestTokenEndpointsAlwaysApplyPeerBeforeDigestLimit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			limiter := &peerAllowingLimiter{}
 			handler := NewHandler(application.Service{}, application.SocialService{}, limiter, slog.Default(), DefaultSettings())
-			mux := http.NewServeMux()
+			mux := gin.New()
 			handler.Register(mux, testHosts(slog.Default()))
 			for _, token := range []string{"first-secret", "second-secret"} {
 				request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, test.path, strings.NewReader(test.body(token)))

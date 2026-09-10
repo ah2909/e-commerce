@@ -8,6 +8,7 @@ import (
 
 	"github.com/ah2909/e-commerce/internal/platform/authn"
 	"github.com/ah2909/e-commerce/internal/platform/problem"
+	"github.com/gin-gonic/gin"
 )
 
 type Middleware struct {
@@ -42,6 +43,29 @@ func (middleware Middleware) Authenticate(next http.Handler) http.Handler {
 		principal := authn.NewPlatformAdminPrincipal("deployment")
 		next.ServeHTTP(w, r.WithContext(authn.WithPrincipal(r.Context(), principal)))
 	})
+}
+
+func (middleware Middleware) AuthenticateGin() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		candidate, ok := bearer(request.Request)
+		if !ok || len(candidate) != encodedTokenLength {
+			middleware.denyGin(request)
+			return
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(candidate)
+		if err != nil || len(decoded) != len(middleware.token) || subtle.ConstantTimeCompare(decoded, middleware.token[:]) != 1 {
+			middleware.denyGin(request)
+			return
+		}
+		principal := authn.NewPlatformAdminPrincipal("deployment")
+		request.Request = request.Request.WithContext(authn.WithPrincipal(request.Request.Context(), principal))
+	}
+}
+
+func (middleware Middleware) denyGin(request *gin.Context) {
+	request.Header("Cache-Control", "no-store")
+	problem.Write(request.Writer, request.Request, http.StatusUnauthorized, "platform_unauthenticated", "Platform authentication is required.", nil)
+	request.Abort()
 }
 
 func bearer(r *http.Request) (string, bool) {

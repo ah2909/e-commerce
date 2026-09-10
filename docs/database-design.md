@@ -6,6 +6,8 @@ This document is the logical PostgreSQL design for the target MVP. It guides fut
 
 PostgreSQL is authoritative for tenant identity, commerce, payments, idempotency, audit, and durable event handoff. Redis, Kafka, search indexes, and object storage are derived or ephemeral systems and cannot replace these records.
 
+Runtime repositories use module-local GORM persistence models over an explicitly bounded `database/sql` pool. Goose SQL migrations alone define and version the physical schema; GORM automatic or programmatic schema mutation is prohibited. Explicit parameterized SQL remains appropriate for locks, guarded updates, complex tenant joins, and other behavior whose concurrency semantics must stay visible.
+
 ## Global conventions
 
 ### Tenant keys
@@ -26,6 +28,8 @@ FOREIGN KEY (store_id, order_id)
 ```
 
 Application scope remains mandatory even if PostgreSQL row-level security is later added. RLS is defense in depth only after transaction-scoped tenant settings and connection-pool reset behavior have dedicated tests.
+
+Runtime repositories use module-local GORM persistence models and require explicit tenant predicates for every tenant-owned operation. GORM models describe mappings only: Goose remains authoritative for schema versioning, constraints, indexes, triggers, and data changes. Concurrency-sensitive locks and guarded mutations may use parameterized raw SQL through GORM when making the database behavior explicit is safer than implicit ORM behavior.
 
 ### Identifiers and versions
 

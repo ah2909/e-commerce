@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -26,6 +25,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/adminauth"
 	"github.com/ah2909/e-commerce/internal/platform/clientaddr"
 	"github.com/ah2909/e-commerce/internal/platform/config"
+	"github.com/ah2909/e-commerce/internal/platform/database"
 	"github.com/ah2909/e-commerce/internal/platform/health"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/logging"
@@ -36,7 +36,6 @@ import (
 	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	storeshttp "github.com/ah2909/e-commerce/internal/stores/transport/http"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -57,15 +56,20 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	startupCtx, startupCancel := context.WithTimeout(ctx, cfg.DependencyTimeout)
+	defer startupCancel()
+	connection, err := database.Open(startupCtx, cfg.DatabaseURL, logger, database.DefaultPoolSettings())
 	if err != nil {
-		return errors.New("parse DATABASE_URL: invalid connection configuration")
+		return err
 	}
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return fmt.Errorf("initialize PostgreSQL pool: %w", err)
+	defer func() {
+		if err := connection.SQL.Close(); err != nil {
+			logger.Warn("close PostgreSQL pool", "error", err)
+		}
+	}()
+	if err := database.VerifySchema(startupCtx, connection.GORM, database.CurrentSchemaVersion); err != nil {
+		return err
 	}
-	defer pool.Close()
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddress})
 	defer func() {
@@ -75,13 +79,14 @@ func run() error {
 	}()
 
 	healthHandler := health.New([]health.Dependency{
-		{Name: "postgresql", Check: pool.Ping},
+		{Name: "postgresql", Check: connection.SQL.PingContext},
 		{Name: "redis", Check: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	}, cfg.DependencyTimeout)
-	mux := http.NewServeMux()
-	healthHandler.Register(mux)
-	storeRepository := storespostgres.NewRepository(pool, auditpostgres.NewWriter())
-	identityRepository := identitypostgres.NewRepository(pool)
+	engine := httpserver.NewEngine(logger)
+	engine.Use(clientaddr.New(cfg.TrustedProxyCIDRs).GinMiddleware())
+	healthHandler.Register(engine)
+	storeRepository := storespostgres.NewRepository(connection.GORM, auditpostgres.NewWriter())
+	identityRepository := identitypostgres.NewRepository(connection.GORM)
 	hostMiddleware := tenant.NewHostMiddleware(storesapplication.NewResolveStore(storeRepository), cfg.TenantBaseDomain, cfg.AuthHost, logger, cfg.TenantResolutionTimeout)
 	passwordHasher, err := identitypassword.NewArgon2ID(cfg.PasswordHashConcurrency)
 	if err != nil {
@@ -119,19 +124,19 @@ func run() error {
 		GuestCreation:    identityhttp.RatePolicy{Maximum: int64(cfg.GuestCreationRateLimit.Maximum), Window: cfg.GuestCreationRateLimit.Window},
 	}
 	identityHandler := identityhttp.NewHandler(identityService, socialService, ratelimit.NewRedis(redisClient, cfg.DependencyTimeout), logger, identitySettings)
-	identityHandler.Register(mux, hostMiddleware)
-	onboardingRepository := onboardingpostgres.NewRepository(pool, storeRepository, identityRepository)
+	identityHandler.Register(engine, hostMiddleware)
+	onboardingRepository := onboardingpostgres.NewRepository(connection.GORM, storeRepository, identityRepository)
 	onboardingService := onboardingapplication.NewService(onboardingRepository, identityService, ids.NewStoreID, time.Now)
 	onboardingHandler := onboardinghttp.NewHandler(onboardingService, ratelimit.NewRedis(redisClient, cfg.DependencyTimeout), logger, cfg.DependencyTimeout, int64(cfg.PlatformProvisionRateLimit.Maximum), cfg.PlatformProvisionRateLimit.Window)
-	onboardingHandler.Register(mux, hostMiddleware, adminauth.New(cfg.PlatformAdminToken).Authenticate)
+	onboardingHandler.Register(engine, hostMiddleware, adminauth.New(cfg.PlatformAdminToken).AuthenticateGin())
 	membershipManager := storesapplication.NewMembershipManager(storeRepository, identityRepository, time.Now)
 	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(storeRepository), logger, cfg.TenantResolutionTimeout)
-	storesHandler := storeshttp.NewHandler(membershipManager, identityHandler.AuthenticateUser, tenantMiddleware, logger, cfg.DependencyTimeout)
-	storesHandler.Register(mux, hostMiddleware)
+	storesHandler := storeshttp.NewHandler(membershipManager, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
+	storesHandler.Register(engine, hostMiddleware)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           httpserver.Middleware(logger, clientaddr.New(cfg.TrustedProxyCIDRs).Middleware(mux)),
+		Handler:           engine,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      apiWriteTimeout(cfg.DependencyTimeout),

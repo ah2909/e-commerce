@@ -2,7 +2,7 @@
 
 ## Context
 
-The current backend uses Go's `net/http`, handwritten `pgx/v5` repositories, Goose migrations, PostgreSQL, and Redis. It has implemented Foundation, tenant context, platform administration, Identity, Stores, and Audit behavior, with two deferred Identity findings documented in [development status](../docs/development-status.md).
+The current backend uses Go's `net/http`, handwritten `pgx/v5` repositories, Goose migrations, PostgreSQL, and Redis. It has implemented Foundation, tenant context, platform administration, Identity, Stores, and Audit behavior, with two deferred Identity findings documented in [development status](../../docs/development-status.md).
 
 The user wants the project to teach widely adopted Go tools as well as deliver the product. This task therefore migrates the complete existing HTTP transport to Gin and the complete existing PostgreSQL persistence layer to GORM. It preserves domain/application boundaries, public behavior, PostgreSQL schema, Goose migration history, tenant isolation, and current security semantics.
 
@@ -138,14 +138,14 @@ Versions are pinned during implementation after checking compatibility with the 
 
 ## Acceptance criteria
 
-- [ ] Given any currently documented request, when it is served through Gin, then its public behavior and security boundary remain compatible.
-- [ ] Given valid existing schema-version-2 data, when GORM repositories read or mutate it, then results match the previous repository behavior without data migration.
-- [ ] Given Store A credentials or identifiers, when any migrated handler/repository path targets Store B, then access is denied or non-enumerating and no state changes.
-- [ ] Given every current atomic workflow and concurrency race, when executed against real PostgreSQL through GORM, then rollback, locking, idempotency, and error semantics remain correct.
-- [ ] Given application/domain packages, when imports are checked, then neither Gin nor GORM appears outside its allowed adapter boundary.
-- [ ] Given runtime and test startup, when code paths are inspected/executed, then GORM `AutoMigrate` and schema-changing Migrator calls are absent.
-- [ ] Given migrations from empty and populated schemas, when Goose commands run, then schema version and constraints remain unchanged and compatible.
-- [ ] Exact focused and complete verification commands pass, followed by independent architecture and security reviews.
+- [x] Given any currently documented request, when it is served through Gin, then its public behavior and security boundary remain compatible.
+- [x] Given valid existing schema-version-2 data, when GORM repositories read or mutate it, then results match the previous repository behavior without data migration.
+- [x] Given Store A credentials or identifiers, when any migrated handler/repository path targets Store B, then access is denied or non-enumerating and no state changes.
+- [x] Given every current atomic workflow and concurrency race, when executed against real PostgreSQL through GORM, then rollback, locking, idempotency, and error semantics remain correct.
+- [x] Given application/domain packages, when imports are checked, then neither Gin nor GORM appears outside its allowed adapter boundary.
+- [x] Given runtime and test startup, when code paths are inspected/executed, then GORM `AutoMigrate` and schema-changing Migrator calls are absent.
+- [x] Given migrations from empty and populated schemas, when Goose commands run, then schema version and constraints remain unchanged and compatible.
+- [x] Exact focused and complete verification commands pass, followed by independent architecture and security reviews.
 
 ## Required completion report
 
@@ -156,15 +156,15 @@ Versions are pinned during implementation after checking compatibility with the 
 
 ## Delivery record
 
-Follow [the project workflow](../docs/development-workflow.md). Keep this record concise and update it as work progresses.
+Follow [the project workflow](../../docs/development-workflow.md). Keep this record concise and update it as work progresses.
 
-- Stage: awaiting plan approval
-- Active task: yes
-- Execution mode: stage-only
-- Last command, completed stage, pending gates, and next suggested command: `$ec-plan`; project-wide migration plan complete; approval, build, independent reviews, fixes if required, and final verification pending; after approval use `$ec-build tasks/007-adopt-gin-gorm-project-wide.md`.
-- Plan revision and approval: revision 1 prepared on 2026-09-09; not yet approved.
+- Stage: complete
+- Active task: no
+- Execution mode: automatic delivery
+- Last request, completed stage, pending gates, and next action: `continue`; implementation, independent reviews, fixes, and final verification complete; archive the accepted task.
+- Plan revision and approval: revision 1 prepared on 2026-09-09 and approved by the user on 2026-09-09.
 - Plan: code-compatible project-wide Gin transport and GORM persistence migration while retaining Goose as schema authority, as specified above.
-- Verification: characterization, API/security, tenant SQL, mapping, atomicity, concurrency, migration compatibility, pool/failure, boundary, and complete checks as specified above.
-- Architect review: pending.
-- Security review: pending.
-- Final evidence: pending.
+- Verification: focused unit and integration checks passed throughout implementation and fixes. The final `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 2, and vulnerability scanning.
+- Architect review: passed with no findings after confirming bounded GORM startup, native Gin boundaries, redirect and method compatibility, exact GET/HEAD middleware chains, documentation consistency, and the final dependency graph.
+- Security review: passed with no findings after confirming tenant isolation, authentication and authorization order, parameterized SQL, transaction safety, redacted logging, redirect hardening, GET/HEAD access equivalence, and the patched dependency graph.
+- Final evidence: `make verify` passed on 2026-09-10. The first final run found reachable `GO-2026-5676` in transitive `quic-go v0.54.0`; upgrading to `quic-go v0.59.1` and `qpack v0.6.0` cleared it. The clean rerun reported zero vulnerabilities in called code or imported packages. Final documentation link, ADR identifier, and diff checks passed before archiving.

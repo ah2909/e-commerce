@@ -6,6 +6,8 @@ This document describes the target architecture for the MVP and its intended gro
 
 The system begins as a modular monolith deployed as one stateless API process and one stateless worker process. PostgreSQL is the authoritative transactional store. Redis provides bounded ephemeral coordination. Kafka carries asynchronous integration events published through a transactional outbox. Object storage holds product media and generated documents.
 
+The API uses Gin for route registration and transport middleware while the standard `http.Server` retains lifecycle and timeout ownership. Runtime PostgreSQL adapters use GORM over one explicitly configured `database/sql` pool. Gin and GORM remain outside application and domain packages, and Goose SQL migrations remain the only schema authority. See the [Gin and GORM placement guide](gin-gorm-guide.md) and [ADR 005](decisions/005-gin-gorm-runtime-adapters.md).
+
 ## Design goals
 
 - Preserve store isolation at every boundary.

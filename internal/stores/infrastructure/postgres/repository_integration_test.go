@@ -26,6 +26,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	storepostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,7 +36,7 @@ import (
 func TestRepositoryTenantIsolationAndVietnameseRoundTrip(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
-	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	repository := storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -80,7 +81,7 @@ func TestRepositoryRejectsCrossStoreUserMembership(t *testing.T) {
 func TestMembershipMutationsAreScopedAuditedAndKeepAnOwner(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
-	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	repository := storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter())
 	ctx := context.Background()
 	now := time.Now().UTC()
 	secondOwnerID, _ := ids.NewUserID()
@@ -110,7 +111,7 @@ func TestMembershipMutationsAreScopedAuditedAndKeepAnOwner(t *testing.T) {
 func TestConcurrentOwnerDemotionsPreserveAnActiveOwner(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)
-	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	repository := storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter())
 	now := time.Now().UTC()
 	secondOwnerID, _ := ids.NewUserID()
 	insertTenantUser(t, pool, pair.A.Store.ID(), secondOwnerID)
@@ -170,15 +171,16 @@ func TestRepositoryDatabaseConstraints(t *testing.T) {
 
 func TestRepositoryRoundTripsInternationalSettingsUnicodeAndUTC(t *testing.T) {
 	pool := integrationPool(t, nil)
-	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	db := gormtest.FromPool(t, pool)
+	repository := storepostgres.NewRepository(db, auditpostgres.NewWriter())
 	storeID, _ := ids.NewStoreID()
 	userID, _ := ids.NewUserID()
 	now := time.Date(2026, 9, 7, 20, 0, 0, 123456000, time.FixedZone("ICT", 7*60*60))
 	decomposedName := "Cửa hàng A\u0301nh Dương"
-	identityRepository := identitypostgres.NewRepository(pool)
+	identityRepository := identitypostgres.NewRepository(db)
 	hasher, _ := identitypassword.NewArgon2ID(1)
 	identityService := identityapplication.NewService(identityRepository, hasher, repository, token.Generator{}, identityapplication.DefaultSessionSettings(), func() time.Time { return now })
-	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(pool, repository, identityRepository), identityService, func() (ids.StoreID, error) { return storeID, nil }, func() time.Time { return now })
+	onboarding := onboardingapplication.NewService(onboardingpostgres.NewRepository(db, repository, identityRepository), identityService, func() (ids.StoreID, error) { return storeID, nil }, func() time.Time { return now })
 	result, err := onboarding.Execute(context.Background(), onboardingapplication.Command{Subdomain: "international-store", StoreName: decomposedName, DefaultCurrency: "USD", Locale: "en-US", Timezone: "America/New_York", Email: "international@example.com", Password: "international-password", PlatformActorID: "deployment", RequestID: "international-store-test"})
 	if err != nil {
 		t.Fatalf("create international store: %v", err)
@@ -230,7 +232,7 @@ func TestResolveTenantUsesOneIndexedQuery(t *testing.T) {
 		t.Fatalf("seed representative memberships: %v", err)
 	}
 	trace.count.Store(0)
-	_, found, err := storepostgres.NewRepository(pool, auditpostgres.NewWriter()).ResolveTenant(context.Background(), pair.A.Store.ID(), pair.A.UserID)
+	_, found, err := storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter()).ResolveTenant(context.Background(), pair.A.Store.ID(), pair.A.UserID)
 	if err != nil || !found || trace.count.Load() != 1 {
 		t.Fatalf("ResolveTenant() = found %v, error %v, queries %d", found, err, trace.count.Load())
 	}
@@ -269,7 +271,7 @@ func TestResolveTenantHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, _, err = storepostgres.NewRepository(pool, auditpostgres.NewWriter()).ResolveTenant(ctx, pair.A.Store.ID(), pair.A.UserID)
+	_, _, err = storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter()).ResolveTenant(ctx, pair.A.Store.ID(), pair.A.UserID)
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > time.Second {
 		t.Fatalf("ResolveTenant() error = %v after %s", err, time.Since(started))
 	}
@@ -278,7 +280,7 @@ func TestResolveTenantHonorsCancellation(t *testing.T) {
 func BenchmarkResolveTenantPostgres(b *testing.B) {
 	pool := integrationPool(b, nil)
 	pair := storefixture.NewPair(b, pool)
-	repository := storepostgres.NewRepository(pool, auditpostgres.NewWriter())
+	repository := storepostgres.NewRepository(gormtest.FromPool(b, pool), auditpostgres.NewWriter())
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

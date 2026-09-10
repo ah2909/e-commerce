@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestMiddlewarePropagatesRequestID(t *testing.T) {
@@ -58,5 +60,61 @@ func TestMiddlewareRecoversPanic(t *testing.T) {
 
 	if response.Code != http.StatusInternalServerError || strings.Contains(output.String(), "sensitive panic value") {
 		t.Fatalf("panic response = %d, log = %q", response.Code, output.String())
+	}
+}
+
+func TestGinEnginePreservesRequestContextAndRecovers(t *testing.T) {
+	var output bytes.Buffer
+	engine := NewEngine(slog.New(slog.NewJSONHandler(&output, nil)))
+	engine.GET("/panic", func(ctx *gin.Context) {
+		if RequestID(ctx.Request.Context()) != "gin-request" {
+			t.Fatal("request ID was not propagated")
+		}
+		panic("sensitive gin panic")
+	})
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/panic", nil)
+	request.Header.Set(requestIDHeader, "gin-request")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || strings.Contains(output.String(), "sensitive gin panic") {
+		t.Fatalf("panic response = %d, log = %q", response.Code, output.String())
+	}
+}
+
+func TestGinEngineMapsUnknownRouteAndMethod(t *testing.T) {
+	engine := NewEngine(slog.New(slog.DiscardHandler))
+	engine.GET("/known", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	for _, test := range []struct {
+		method string
+		path   string
+		status int
+		code   string
+	}{{http.MethodGet, "/missing", http.StatusNotFound, "route_not_found"}, {http.MethodPost, "/known", http.StatusMethodNotAllowed, "method_not_allowed"}} {
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), test.method, test.path, nil))
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.code) {
+			t.Fatalf("%s %s = %d %s", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestGinEngineDoesNotRedirectSlashMismatches(t *testing.T) {
+	engine := NewEngine(slog.New(slog.DiscardHandler))
+	engine.GET("/tenant", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	engine.POST("/platform", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	for _, test := range []struct {
+		method string
+		path   string
+		host   string
+	}{{http.MethodGet, "/tenant/", "shop.example.test"}, {http.MethodPost, "/platform/", "invalid.example"}} {
+		request := httptest.NewRequestWithContext(context.Background(), test.method, test.path, nil)
+		request.Host = test.host
+		request.Header.Set("X-Forwarded-Prefix", "/attacker")
+		request.Header.Set(requestIDHeader, "slash-request")
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || response.Header().Get("Location") != "" || response.Header().Get(requestIDHeader) != "slash-request" || !strings.Contains(response.Body.String(), "route_not_found") {
+			t.Fatalf("%s %s = %d, headers=%v, body=%s", test.method, test.path, response.Code, response.Header(), response.Body.String())
+		}
 	}
 }

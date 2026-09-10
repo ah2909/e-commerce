@@ -14,7 +14,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 | Task | State | Next gate |
 | --- | --- | --- |
-| [004 Identity and authorization](004-identity-authorization.md) | Revision 5 verified for continued development; two medium findings deferred and task inactive | Reopen with `$ec-fix` before production |
+| [004 Identity and authorization](004-identity-authorization.md) | Revision 5 verified for continued development; two medium findings explicitly skipped and task inactive | None scheduled; reopen with `$ec-fix` only if the risk decision changes |
 | [005 Documentation and status standardization](005-correct-system-design-documentation.md) | Reviews passed and user accepted; final verification explicitly skipped, task inactive | Reopen with `$ec-test` only if verification evidence is required |
 
 ## Archived tasks
@@ -25,6 +25,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [001 Bootstrap](archive/001-bootstrap.md) | Go service foundation, dependencies, health, migrations, CI, and verification targets |
 | [002 Stage commands](archive/002-stage-commands.md) | Reusable stage-only workflow skills |
 | [003 Store context](archive/003-store-context.md) | Store aggregate, tenant context, persistence, and isolation baseline |
+| [007 Gin and GORM migration](archive/007-adopt-gin-gorm-project-wide.md) | Native Gin transport and GORM persistence adapters with preserved schema, API, tenant, and concurrency behavior |
 
 ## Starting work
 

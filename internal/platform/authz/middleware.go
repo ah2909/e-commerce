@@ -8,6 +8,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/problem"
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
+	"github.com/gin-gonic/gin"
 )
 
 func Require(permission domain.Permission, logger *slog.Logger, next http.Handler) http.Handler {
@@ -20,4 +21,15 @@ func Require(permission domain.Permission, logger *slog.Logger, next http.Handle
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func RequireGin(permission domain.Permission, logger *slog.Logger) gin.HandlerFunc {
+	return func(request *gin.Context) {
+		resolved, ok := tenant.FromContext(request.Request.Context())
+		if !ok || !resolved.Role().Allows(permission) {
+			logger.Warn("permission denied", "request_id", httpserver.RequestID(request.Request.Context()), "permission", permission)
+			problem.Write(request.Writer, request.Request, http.StatusForbidden, "permission_denied", "Permission is denied.", nil)
+			request.Abort()
+		}
+	}
 }
