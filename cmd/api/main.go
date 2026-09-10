@@ -87,6 +87,7 @@ func run() error {
 		{Name: "redis", Check: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	}, cfg.DependencyTimeout)
 	engine := httpserver.NewEngine(logger)
+	engine.Use(httpserver.CORS(cfg.CORSAllowedOrigins))
 	engine.Use(clientaddr.New(cfg.TrustedProxyCIDRs).GinMiddleware())
 	healthHandler.Register(engine)
 	storeRepository := storespostgres.NewRepository(connection.GORM, auditpostgres.NewWriter())

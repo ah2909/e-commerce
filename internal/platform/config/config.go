@@ -68,6 +68,7 @@ type Config struct {
 	AuthHost                   string
 	PlatformAdminToken         [32]byte
 	TrustedProxyCIDRs          []netip.Prefix
+	CORSAllowedOrigins         []string
 	RegistrationRateLimit      CredentialRateLimit
 	LoginRateLimit             CredentialRateLimit
 	TokenRateLimit             CredentialRateLimit
@@ -170,6 +171,10 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	corsAllowedOrigins, err := parseOrigins(optionalEmpty(lookup, "CORS_ALLOWED_ORIGINS"))
+	if err != nil {
+		return Config{}, err
+	}
 	registrationRate, err := credentialRateLimit(lookup, "REGISTRATION", 10, 5, time.Hour)
 	if err != nil {
 		return Config{}, err
@@ -230,6 +235,7 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		AuthHost:                   authHost,
 		PlatformAdminToken:         platformAdminToken,
 		TrustedProxyCIDRs:          trustedProxyCIDRs,
+		CORSAllowedOrigins:         corsAllowedOrigins,
 		RegistrationRateLimit:      registrationRate,
 		LoginRateLimit:             loginRate,
 		TokenRateLimit:             tokenRate,
@@ -383,6 +389,31 @@ func parseCIDRs(value string) ([]netip.Prefix, error) {
 		prefixes = append(prefixes, prefix.Masked())
 	}
 	return prefixes, nil
+}
+
+func parseOrigins(value string) ([]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) > 32 {
+		return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at most 32 origins")
+	}
+	origins := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		parsed, err := url.Parse(strings.TrimSpace(part))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS must contain only HTTP origins without paths")
+		}
+		origin := strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 func parseReturnPaths(value string) ([]string, error) {

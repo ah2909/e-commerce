@@ -80,6 +80,7 @@ Independent architecture and security re-review completed with changes required.
 - User and guest principals are distinct, and permissions deny by default.
 - Membership targeting uses tenant-local user ID rather than unverified email.
 - PostgreSQL, Redis, configuration, provider fixtures, API contract, and concurrency tests exist for substantial Identity behavior.
+- Browser frontends can use the configured exact-origin CORS allowlist; cross-origin access is disabled when the allowlist is empty.
 - No downstream commerce module falsely appears implemented.
 
 These positives do not waive the blockers above.

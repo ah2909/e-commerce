@@ -79,6 +79,7 @@ Important boundaries:
 - `TENANT_BASE_DOMAIN` and `AUTH_HOST` define trusted host routing.
 - `PLATFORM_ADMIN_TOKEN` protects base-domain store provisioning and has no Makefile default; supply 32 random bytes encoded as unpadded base64url through the environment or a secret manager. The value in `.env.example` is for local development only.
 - `TRUSTED_PROXY_CIDRS` controls when forwarded client addresses may influence rate limiting; it never affects tenant host selection.
+- `CORS_ALLOWED_ORIGINS` is a comma-separated exact HTTP(S) origin allowlist for browser frontends; empty disables cross-origin access and wildcards are rejected.
 - `DATABASE_URL` is runtime state; `TEST_DATABASE_URL` must identify a loopback database ending in `_test` before integration mutation is allowed.
 - Google or Facebook login remains disabled unless its complete provider configuration is present and valid.
 - Provider, database, Redis, and token configuration must come from deployment secrets/configuration, never committed production values.

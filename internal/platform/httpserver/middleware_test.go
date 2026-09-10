@@ -118,3 +118,36 @@ func TestGinEngineDoesNotRedirectSlashMismatches(t *testing.T) {
 		}
 	}
 }
+
+func TestCORSAllowsConfiguredOriginAndPreflight(t *testing.T) {
+	engine := NewEngine(slog.New(slog.DiscardHandler))
+	engine.Use(CORS([]string{"http://localhost:5173"}))
+	engine.GET("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodOptions, "/resource", nil)
+	request.Header.Set("Origin", "http://localhost:5173")
+	request.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	request.Header.Set("Access-Control-Request-Headers", "Authorization")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+		t.Fatalf("preflight = %d, headers=%v", response.Code, response.Header())
+	}
+	if response.Header().Get("Access-Control-Allow-Methods") != corsAllowMethods || response.Header().Get("Access-Control-Allow-Headers") != corsAllowHeaders {
+		t.Fatalf("preflight policy headers = %v", response.Header())
+	}
+}
+
+func TestCORSDoesNotAuthorizeUnconfiguredOrigin(t *testing.T) {
+	engine := NewEngine(slog.New(slog.DiscardHandler))
+	engine.Use(CORS([]string{"http://localhost:5173"}))
+	engine.GET("/resource", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/resource", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("cross-origin response = %d, headers=%v", response.Code, response.Header())
+	}
+}

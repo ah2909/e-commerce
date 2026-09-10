@@ -29,6 +29,7 @@ func TestLoadFrom(t *testing.T) {
 	values["TOKEN_RATE_PEER_MAXIMUM"] = "18"
 	values["TOKEN_RATE_IDENTITY_MAXIMUM"] = "7"
 	values["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8,2001:db8::/32"
+	values["CORS_ALLOWED_ORIGINS"] = "http://localhost:5173, https://admin.example.test"
 	values["GOOGLE_CLIENT_ID"] = "google-client"
 	values["GOOGLE_CLIENT_SECRET"] = "google-secret"
 	values["GOOGLE_REDIRECT_URL"] = "https://auth.example.test/api/v1/auth/social/google/callback"
@@ -61,6 +62,9 @@ func TestLoadFrom(t *testing.T) {
 	}
 	if got.TokenRateLimit.PeerMaximum != 18 || got.TokenRateLimit.IdentityMaximum != 7 || len(got.TrustedProxyCIDRs) != 2 {
 		t.Fatalf("LoadFrom() token/proxy fields = %#v, %#v", got.TokenRateLimit, got.TrustedProxyCIDRs)
+	}
+	if len(got.CORSAllowedOrigins) != 2 || got.CORSAllowedOrigins[1] != "https://admin.example.test" {
+		t.Fatalf("LoadFrom() CORS origins = %#v", got.CORSAllowedOrigins)
 	}
 	if !bytes.Equal(got.PlatformAdminToken[:], bytes.Repeat([]byte{0x42}, 32)) {
 		t.Fatal("LoadFrom() platform token mismatch")
@@ -101,6 +105,9 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "invalid platform token", key: "PLATFORM_ADMIN_TOKEN", value: "not-base64!", want: "PLATFORM_ADMIN_TOKEN"},
 		{name: "short platform token", key: "PLATFORM_ADMIN_TOKEN", value: "c2hvcnQ", want: "exactly 32 bytes"},
 		{name: "invalid trusted proxy", key: "TRUSTED_PROXY_CIDRS", value: "not-a-prefix", want: "TRUSTED_PROXY_CIDRS"},
+		{name: "wildcard CORS origin", key: "CORS_ALLOWED_ORIGINS", value: "*", want: "CORS_ALLOWED_ORIGINS"},
+		{name: "CORS origin path", key: "CORS_ALLOWED_ORIGINS", value: "https://admin.example.test/path", want: "CORS_ALLOWED_ORIGINS"},
+		{name: "CORS origin credentials", key: "CORS_ALLOWED_ORIGINS", value: "https://user@admin.example.test", want: "CORS_ALLOWED_ORIGINS"},
 		{name: "invalid database", key: "DATABASE_URL", value: "redis://localhost:6379", want: "DATABASE_URL"},
 		{name: "invalid redis", key: "REDIS_ADDRESS", value: "localhost", want: "REDIS_ADDRESS"},
 		{name: "nonnumeric Redis port", key: "REDIS_ADDRESS", value: "localhost:invalid", want: "REDIS_ADDRESS"},
