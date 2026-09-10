@@ -13,6 +13,10 @@ var ErrInvalid = errors.New("invalid identifier")
 type StoreID string
 type UserID string
 type GuestID string
+type ProductID string
+type VariantID string
+type CategoryID string
+type MediaID string
 
 func ParseStoreID(value string) (StoreID, error) {
 	value, err := parseUUID(value)
@@ -38,13 +42,40 @@ func ParseGuestID(value string) (GuestID, error) {
 	return GuestID(value), nil
 }
 
-func NewStoreID() (StoreID, error) { value, err := newUUID(); return StoreID(value), err }
-func NewUserID() (UserID, error)   { value, err := newUUID(); return UserID(value), err }
-func NewGuestID() (GuestID, error) { value, err := newUUID(); return GuestID(value), err }
+func ParseProductID(value string) (ProductID, error) {
+	return parseTypedID[ProductID](value, "product")
+}
+func ParseVariantID(value string) (VariantID, error) {
+	return parseTypedID[VariantID](value, "variant")
+}
+func ParseCategoryID(value string) (CategoryID, error) {
+	return parseTypedID[CategoryID](value, "category")
+}
+func ParseMediaID(value string) (MediaID, error) { return parseTypedID[MediaID](value, "media") }
 
-func (id StoreID) String() string { return string(id) }
-func (id UserID) String() string  { return string(id) }
-func (id GuestID) String() string { return string(id) }
+func NewStoreID() (StoreID, error)       { value, err := newUUID(); return StoreID(value), err }
+func NewUserID() (UserID, error)         { value, err := newUUID(); return UserID(value), err }
+func NewGuestID() (GuestID, error)       { value, err := newUUID(); return GuestID(value), err }
+func NewProductID() (ProductID, error)   { value, err := newUUID(); return ProductID(value), err }
+func NewVariantID() (VariantID, error)   { value, err := newUUID(); return VariantID(value), err }
+func NewCategoryID() (CategoryID, error) { value, err := newUUID(); return CategoryID(value), err }
+func NewMediaID() (MediaID, error)       { value, err := newUUID(); return MediaID(value), err }
+
+func (id StoreID) String() string    { return string(id) }
+func (id UserID) String() string     { return string(id) }
+func (id GuestID) String() string    { return string(id) }
+func (id ProductID) String() string  { return string(id) }
+func (id VariantID) String() string  { return string(id) }
+func (id CategoryID) String() string { return string(id) }
+func (id MediaID) String() string    { return string(id) }
+
+func parseTypedID[T ~string](value, name string) (T, error) {
+	parsed, err := parseUUID(value)
+	if err != nil {
+		return "", fmt.Errorf("parse %s ID: %w", name, err)
+	}
+	return T(parsed), nil
+}
 
 func parseUUID(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))

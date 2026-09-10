@@ -3,13 +3,15 @@
 ## Snapshot
 
 - Assessed: 2026-09-10
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus the current task 007 Gin/GORM migration working tree
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007 and 008
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
 This is the authoritative current-state summary. Detailed historical evidence remains in [task records](../tasks/README.md). A feature is complete only when its approved acceptance criteria, independent architecture/security reviews, and final verification pass on the same relevant artifacts.
 
 Task 007 migrated production API routing and transport middleware to Gin and production repositories and cross-module transactions to GORM without changing Goose schema version 2. Independent architecture and security reviews passed after compatibility and hardening corrections, and final verification passed on 2026-09-10.
+
+Task 008 completed tenant-scoped draft Catalog authoring. Both independent reviews and final verification passed on 2026-09-10.
 
 ## Status meanings
 
@@ -29,7 +31,7 @@ Task 007 migrated production API routing and transport middleware to Gin and pro
 | Tenant context | Implemented, changes required | Store persistence, tenant middleware, and the task 003 isolation baseline exist. Task 004 changed host and session behavior; its two remaining medium findings are explicitly skipped and retained as accepted risks below. Current routing implements shared-base-domain subdomains, not the target customer-managed exact-host single-store mode. |
 | Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed; the store-suspension/session race remains an explicitly accepted risk. |
 | Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission are explicitly accepted unresolved risks. |
-| Catalog | Not started | No Catalog module or catalog schema exists. |
+| Catalog | Partially implemented | Accepted [task 008](../tasks/archive/008-catalog-authoring-foundation.md) adds draft product, variant, category, and media authoring with tenant-scoped migration 3, optimistic aggregate writes, admin APIs, and keyset pagination. Publication and public reads remain intentionally blocked until Pricing supplies current-price readiness. |
 | Pricing and coupons | Not started | No Money value object, Pricing module, price/coupon schema, or contract exists. |
 | Inventory | Not started | No stock item, reservation, ledger, expiry worker, or concurrency implementation exists. |
 | Customers and carts | Not started | Guest identity exists, but customer profiles, addresses, carts, and cart ownership do not. |
@@ -55,7 +57,13 @@ Task 007 migrated production API routing and transport middleware to Gin and pro
 - membership roles
 - limited Store/membership audit records with typed platform or tenant actors
 
-The schema intentionally does not include platform operators. It also does not include Catalog, Pricing, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, outbox, or inbox tables.
+### Migration 00003
+
+- store-owned Catalog products, variants, category hierarchy, product-category assignments, and ordered media references
+- scoped uniqueness for product/category slugs, variant SKUs, and optional barcodes
+- optimistic versions, retained archive state, physical measurements in grams/millimetres, and keyset query indexes
+
+The schema intentionally does not include platform operators. It also does not include Pricing, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, outbox, or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -80,9 +88,9 @@ These positives do not waive the blockers above.
 
 [api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, health, and onboarding endpoints. It is an implementation contract for unfinished task 004, not the complete MVP API.
 
-`POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session.
+`POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`; it does not add a public Catalog route.
 
-Catalog, pricing, inventory, customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints are absent because those slices are not implemented.
+Public Catalog, pricing, inventory, customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints are absent because those slices are not implemented.
 
 ## Verification evidence
 
@@ -112,8 +120,10 @@ Task 004 consolidated MVP verification on 2026-09-09: full unit and integration 
 
 Task 007 final verification on 2026-09-10: `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 2, and vulnerability scanning. The initial final scan exposed reachable `GO-2026-5676` in Gin's transitive QUIC dependency; `quic-go v0.59.1` and `qpack v0.6.0` cleared it, and both independent reviewers approved the final module graph. The clean scan reported zero vulnerabilities in called code or imported packages.
 
+Task 008 final verification on 2026-09-10: both independent reviews passed with no findings, then `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 3, and vulnerability scanning. The scan reported zero vulnerabilities in called code or imported packages. Focused PostgreSQL evidence also covered exact migration definitions, populated version-2 upgrade and repeat, tenant isolation, aggregate atomicity, hierarchy locking, and synchronized edit/archive races.
+
 ## Required next work
 
-1. Begin Catalog with Task 004 treated as unaccepted and its two unresolved findings explicitly accepted and skipped.
+1. Add Pricing-backed publication and public Catalog reads without weakening the current-price requirement.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

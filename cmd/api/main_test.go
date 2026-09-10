@@ -26,3 +26,12 @@ func TestAPIWriteTimeoutAllowsReadinessToFinish(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogRoutesRequireSchemaThree(t *testing.T) {
+	if catalogAvailable(2) {
+		t.Fatal("Catalog was available before migration 3")
+	}
+	if !catalogAvailable(3) {
+		t.Fatal("Catalog was unavailable at migration 3")
+	}
+}

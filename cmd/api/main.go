@@ -12,6 +12,9 @@ import (
 	"time"
 
 	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	catalogapplication "github.com/ah2909/e-commerce/internal/catalog/application"
+	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
+	cataloghttp "github.com/ah2909/e-commerce/internal/catalog/transport/http"
 	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
 	identitydomain "github.com/ah2909/e-commerce/internal/identity/domain"
 	identitypassword "github.com/ah2909/e-commerce/internal/identity/infrastructure/password"
@@ -67,7 +70,8 @@ func run() error {
 			logger.Warn("close PostgreSQL pool", "error", err)
 		}
 	}()
-	if err := database.VerifySchema(startupCtx, connection.GORM, database.CurrentSchemaVersion); err != nil {
+	schemaVersion, err := database.VerifySchemaRange(startupCtx, connection.GORM, database.MinimumCompatibleSchemaVersion, database.CurrentSchemaVersion)
+	if err != nil {
 		return err
 	}
 
@@ -133,6 +137,14 @@ func run() error {
 	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(storeRepository), logger, cfg.TenantResolutionTimeout)
 	storesHandler := storeshttp.NewHandler(membershipManager, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 	storesHandler.Register(engine, hostMiddleware)
+	if catalogAvailable(schemaVersion) {
+		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
+		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
+		catalogHandler := cataloghttp.NewHandler(catalogService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
+		catalogHandler.Register(engine, hostMiddleware)
+	} else {
+		logger.Info("Catalog routes await schema migration", "schema_version", schemaVersion)
+	}
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress,
@@ -155,6 +167,8 @@ func run() error {
 	logger.Info("API stopped")
 	return nil
 }
+
+func catalogAvailable(schemaVersion int64) bool { return schemaVersion >= 3 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

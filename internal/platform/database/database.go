@@ -14,7 +14,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-const CurrentSchemaVersion int64 = 2
+const CurrentSchemaVersion int64 = 3
+const MinimumCompatibleSchemaVersion int64 = 2
 
 type PoolSettings struct {
 	MaxOpenConnections int
@@ -60,13 +61,25 @@ func configureAndPing(ctx context.Context, sqlDB *sql.DB, settings PoolSettings)
 }
 
 func VerifySchema(ctx context.Context, db *gorm.DB, expected int64) error {
+	_, err := VerifySchemaRange(ctx, db, expected, expected)
+	return err
+}
+
+func VerifySchemaRange(ctx context.Context, db *gorm.DB, minimum, maximum int64) (int64, error) {
 	var version int64
 	err := db.WithContext(ctx).Raw(`SELECT COALESCE(MAX(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version).Error
 	if err != nil {
-		return fmt.Errorf("read Goose schema version: %w", err)
+		return 0, fmt.Errorf("read Goose schema version: %w", err)
 	}
-	if version != expected {
-		return fmt.Errorf("incompatible Goose schema version: got %d, want %d", version, expected)
+	if err := validateSchemaVersion(version, minimum, maximum); err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+func validateSchemaVersion(version, minimum, maximum int64) error {
+	if minimum < 1 || maximum < minimum || version < minimum || version > maximum {
+		return fmt.Errorf("incompatible Goose schema version: got %d, want %d through %d", version, minimum, maximum)
 	}
 	return nil
 }

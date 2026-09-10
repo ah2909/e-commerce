@@ -69,3 +69,16 @@ func TestDefaultPoolSettingsAreBounded(t *testing.T) {
 		t.Fatalf("invalid pool settings: %+v", settings)
 	}
 }
+
+func TestSchemaCompatibilityRange(t *testing.T) {
+	for _, version := range []int64{MinimumCompatibleSchemaVersion, CurrentSchemaVersion} {
+		if err := validateSchemaVersion(version, MinimumCompatibleSchemaVersion, CurrentSchemaVersion); err != nil {
+			t.Fatalf("version %d: %v", version, err)
+		}
+	}
+	for _, version := range []int64{1, 4} {
+		if err := validateSchemaVersion(version, MinimumCompatibleSchemaVersion, CurrentSchemaVersion); err == nil {
+			t.Fatalf("version %d was accepted", version)
+		}
+	}
+}

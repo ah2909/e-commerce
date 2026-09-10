@@ -28,6 +28,9 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/auth/social/{provider}/sessions", "/api/v1/auth/social/{provider}/callback",
 		"/api/v1/auth/social/continue", "/api/v1/onboarding/stores", "/api/v1/store", "/api/v1/guest-sessions",
 		"/api/v1/memberships", "/api/v1/memberships/{user_id}",
+		"/api/v1/admin/catalog/categories", "/api/v1/admin/catalog/categories/{category_id}",
+		"/api/v1/admin/catalog/categories/{category_id}/archive", "/api/v1/admin/catalog/products",
+		"/api/v1/admin/catalog/products/{product_id}", "/api/v1/admin/catalog/products/{product_id}/archive",
 	}
 	for _, path := range wantPaths {
 		if _, ok := document.Paths[path]; !ok {
@@ -54,9 +57,33 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/memberships/{user_id}", "patch", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/guest-sessions/current", "get", false, []string{"200", "401", "404", "503"})
 	assertOperationContract(t, document, "/api/v1/auth/sessions/refresh", "post", true, []string{"200", "400", "401", "429", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/catalog/products", "get", false, []string{"200", "400", "401", "403", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/catalog/products", "post", true, []string{"201", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/catalog/products/{product_id}", "put", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/catalog/categories/{category_id}/archive", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
+	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)
+	assertCatalogResponseSchemas(t, document)
+}
+
+func assertCatalogResponseSchemas(t *testing.T, document map[string]any) {
+	t.Helper()
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"CatalogVariant", "CatalogMedia"} {
+		schema := schemas[name].(map[string]any)
+		if _, composed := schema["allOf"]; composed || schema["additionalProperties"] != false {
+			t.Errorf("%s is not a closed standalone response schema", name)
+		}
+	}
+	product := schemas["CatalogProduct"].(map[string]any)
+	properties := product["properties"].(map[string]any)
+	for _, name := range []string{"variants", "category_ids", "media"} {
+		if properties[name].(map[string]any)["type"] != "array" {
+			t.Errorf("CatalogProduct.%s is not an array", name)
+		}
+	}
 }
 
 func assertSecurityScheme(t *testing.T, document map[string]any, path, method, scheme string) {

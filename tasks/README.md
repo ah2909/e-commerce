@@ -26,6 +26,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [002 Stage commands](archive/002-stage-commands.md) | Reusable stage-only workflow skills |
 | [003 Store context](archive/003-store-context.md) | Store aggregate, tenant context, persistence, and isolation baseline |
 | [007 Gin and GORM migration](archive/007-adopt-gin-gorm-project-wide.md) | Native Gin transport and GORM persistence adapters with preserved schema, API, tenant, and concurrency behavior |
+| [008 Catalog authoring foundation](archive/008-catalog-authoring-foundation.md) | Tenant-safe draft Catalog authoring, migration 3, admin APIs, and concurrency/isolation evidence |
 
 ## Starting work
 
