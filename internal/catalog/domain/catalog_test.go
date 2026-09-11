@@ -58,3 +58,24 @@ func TestCategoryRejectsSelfParent(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestProductPublishesOnlyOnceFromDraft(t *testing.T) {
+	store, _ := ids.ParseStoreID("11111111-1111-4111-8111-111111111111")
+	productID, _ := ids.ParseProductID("22222222-2222-4222-8222-222222222222")
+	variantID, _ := ids.ParseVariantID("33333333-3333-4333-8333-333333333333")
+	now := time.Now().UTC()
+	product, err := NewProduct(store, productID, ProductDraft{Name: "Product", Slug: "product", Variants: []VariantDraft{{ID: variantID, SKU: "SKU"}}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := product.Published(now.Add(time.Minute))
+	if err != nil || published.Status != ProductStatusPublished || published.PublishedAt == nil || published.Version != 2 {
+		t.Fatalf("published = %#v, error = %v", published, err)
+	}
+	if _, err := published.Published(now); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("republish error = %v", err)
+	}
+	if _, err := published.Replaced(ProductDraft{}, now); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("edit published error = %v", err)
+	}
+}

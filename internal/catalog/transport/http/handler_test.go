@@ -107,7 +107,10 @@ func (stub tenantRepositoryStub) ResolveTenant(_ context.Context, storeID ids.St
 	return storesapplication.TenantRecord{StoreID: storeID, UserID: userID, StoreName: "Shop", StoreStatus: storesdomain.StoreStatusActive, MembershipStatus: storesdomain.MembershipStatusActive, Role: stub.role, DefaultCurrency: "VND", Locale: "vi-VN", Timezone: "Asia/Ho_Chi_Minh", SettingsVersion: 1}, true, nil
 }
 
-type serviceStub struct{ storeID ids.StoreID }
+type serviceStub struct {
+	storeID       ids.StoreID
+	publicStoreID ids.StoreID
+}
 
 func (*serviceStub) CreateProduct(context.Context, ids.StoreID, domain.ProductDraft) (domain.Product, error) {
 	return domain.Product{}, nil
@@ -124,6 +127,16 @@ func (*serviceStub) ListProducts(context.Context, ids.StoreID, int, string) (app
 func (*serviceStub) ArchiveProduct(context.Context, ids.StoreID, ids.ProductID, int64) (domain.Product, error) {
 	return domain.Product{}, nil
 }
+func (*serviceStub) PublishProduct(context.Context, ids.StoreID, ids.ProductID, int64, string) (domain.Product, error) {
+	return domain.Product{}, nil
+}
+func (*serviceStub) GetPublicProduct(context.Context, ids.StoreID, string) (application.PublicProduct, error) {
+	return application.PublicProduct{}, nil
+}
+func (stub *serviceStub) ListPublicProducts(_ context.Context, storeID ids.StoreID, _ int, _ string) (application.PublicPage, error) {
+	stub.publicStoreID = storeID
+	return application.PublicPage{}, nil
+}
 func (*serviceStub) CreateCategory(context.Context, ids.StoreID, *ids.CategoryID, string, string) (domain.Category, error) {
 	return domain.Category{}, nil
 }
@@ -136,4 +149,30 @@ func (stub *serviceStub) ListCategories(_ context.Context, storeID ids.StoreID) 
 }
 func (*serviceStub) ArchiveCategory(context.Context, ids.StoreID, ids.CategoryID, int64) (domain.Category, error) {
 	return domain.Category{}, nil
+}
+
+func TestPublicCatalogRequiresOnlyValidActiveStoreHost(t *testing.T) {
+	storeID, _ := ids.ParseStoreID("11111111-1111-4111-8111-111111111111")
+	userID, _ := ids.ParseUserID("33333333-3333-4333-8333-333333333333")
+	logger := slog.New(slog.DiscardHandler)
+	engine := httpserver.NewEngine(logger)
+	hosts := tenant.NewHostMiddleware(hostResolverStub{storeID: storeID}, "example.test", "auth.example.test", logger, time.Second)
+	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(tenantRepositoryStub{storeID: storeID, userID: userID, role: storesdomain.RoleOwner}), logger, time.Second)
+	service := &serviceStub{}
+	handler := NewHandler(service, func(*gin.Context) {}, tenantMiddleware, logger, time.Second)
+	handler.RegisterPublication(engine, hosts)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "http://shop.example.test/api/v1/catalog/products", nil)
+	request.Host = "shop.example.test"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.publicStoreID != storeID {
+		t.Fatalf("status = %d, store = %s, body = %s", response.Code, service.publicStoreID, response.Body.String())
+	}
+	admin := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://shop.example.test/api/v1/admin/catalog/products/22222222-2222-4222-8222-222222222222/publish", strings.NewReader(`{"expected_version":1}`))
+	admin.Host = "shop.example.test"
+	adminResponse := httptest.NewRecorder()
+	engine.ServeHTTP(adminResponse, admin)
+	if adminResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("admin status = %d, body = %s", adminResponse.Code, adminResponse.Body.String())
+	}
 }

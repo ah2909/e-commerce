@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ah2909/e-commerce/internal/catalog/domain"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
+	"github.com/ah2909/e-commerce/internal/shared/money"
 )
 
 var (
@@ -18,6 +20,8 @@ var (
 )
 
 const MaxPageSize = 100
+const publicScanBatchSize = 50
+const publicMaxScanBatches = 3
 
 type Cursor struct {
 	UpdatedAt time.Time     `json:"updated_at"`
@@ -26,6 +30,47 @@ type Cursor struct {
 
 type Page struct {
 	Products   []domain.Product
+	NextCursor string
+}
+
+type PublishedCursor struct {
+	PublishedAt time.Time     `json:"published_at"`
+	ProductID   ids.ProductID `json:"product_id"`
+}
+
+type PublicPrice struct {
+	AmountMinor  int64  `json:"amount_minor"`
+	Currency     string `json:"currency"`
+	VATInclusive bool   `json:"vat_inclusive"`
+}
+
+type PublicVariant struct {
+	VariantID    ids.VariantID     `json:"variant_id"`
+	SKU          string            `json:"sku"`
+	OptionValues map[string]string `json:"option_values"`
+	WeightGrams  int64             `json:"weight_grams"`
+	Dimensions   domain.Dimensions `json:"dimensions"`
+	Price        PublicPrice       `json:"price"`
+}
+
+type PublicMedia struct {
+	ObjectKey string `json:"object_key"`
+	AltText   string `json:"alt_text"`
+	Position  int    `json:"position"`
+}
+
+type PublicProduct struct {
+	ProductID   ids.ProductID   `json:"product_id"`
+	Name        string          `json:"name"`
+	Slug        string          `json:"slug"`
+	Description string          `json:"description"`
+	PublishedAt time.Time       `json:"published_at"`
+	Variants    []PublicVariant `json:"variants"`
+	Media       []PublicMedia   `json:"media"`
+}
+
+type PublicPage struct {
+	Products   []PublicProduct
 	NextCursor string
 }
 
@@ -39,6 +84,16 @@ type Repository interface {
 	ReplaceCategory(context.Context, ids.StoreID, ids.CategoryID, int64, domain.Category) (domain.Category, error)
 	ListCategories(context.Context, ids.StoreID) ([]domain.Category, error)
 	ArchiveCategory(context.Context, ids.StoreID, ids.CategoryID, int64, time.Time) (domain.Category, error)
+	GetPublishedBySlug(context.Context, ids.StoreID, string) (domain.Product, error)
+	ListPublished(context.Context, ids.StoreID, int, *PublishedCursor) ([]domain.Product, error)
+}
+
+type Publisher interface {
+	Publish(context.Context, ids.StoreID, ids.ProductID, int64, string) (domain.Product, error)
+}
+
+type PriceResolver interface {
+	ResolveCurrent(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]money.Money, error)
 }
 
 type IDGenerator struct {
@@ -52,10 +107,17 @@ type Service struct {
 	repository Repository
 	ids        IDGenerator
 	now        func() time.Time
+	publisher  Publisher
+	prices     PriceResolver
 }
 
 func NewService(repository Repository, generator IDGenerator, now func() time.Time) Service {
 	return Service{repository: repository, ids: generator, now: now}
+}
+
+func (service Service) WithPublication(publisher Publisher, prices PriceResolver) Service {
+	service.publisher, service.prices = publisher, prices
+	return service
 }
 
 func DefaultIDGenerator() IDGenerator {
@@ -172,6 +234,154 @@ func (service Service) ArchiveProduct(ctx context.Context, storeID ids.StoreID, 
 		return domain.Product{}, fmt.Errorf("archive product: %w", err)
 	}
 	return product, nil
+}
+
+func (service Service) PublishProduct(ctx context.Context, storeID ids.StoreID, productID ids.ProductID, expectedVersion int64, correlationID string) (domain.Product, error) {
+	if service.publisher == nil || expectedVersion < 1 || strings.TrimSpace(correlationID) == "" {
+		return domain.Product{}, domain.ErrInvalidCatalog
+	}
+	product, err := service.publisher.Publish(ctx, storeID, productID, expectedVersion, correlationID)
+	if err != nil {
+		return domain.Product{}, fmt.Errorf("publish product: %w", err)
+	}
+	return product, nil
+}
+
+func (service Service) GetPublicProduct(ctx context.Context, storeID ids.StoreID, slug string) (PublicProduct, error) {
+	if service.prices == nil {
+		return PublicProduct{}, ErrNotFound
+	}
+	product, err := service.repository.GetPublishedBySlug(ctx, storeID, strings.ToLower(strings.TrimSpace(slug)))
+	if err != nil {
+		return PublicProduct{}, err
+	}
+	prices, err := service.prices.ResolveCurrent(ctx, storeID, activeVariantIDs([]domain.Product{product}))
+	if err != nil {
+		return PublicProduct{}, fmt.Errorf("resolve public prices: %w", err)
+	}
+	projected, ok := publicProduct(product, prices)
+	if !ok {
+		return PublicProduct{}, ErrNotFound
+	}
+	return projected, nil
+}
+
+func (service Service) ListPublicProducts(ctx context.Context, storeID ids.StoreID, limit int, encoded string) (PublicPage, error) {
+	if service.prices == nil {
+		return PublicPage{}, ErrNotFound
+	}
+	if limit == 0 {
+		limit = 25
+	}
+	if limit < 1 || limit > MaxPageSize {
+		return PublicPage{}, domain.ErrInvalidCatalog
+	}
+	cursor, err := decodePublishedCursor(encoded)
+	if err != nil {
+		return PublicPage{}, domain.ErrInvalidCatalog
+	}
+	page := PublicPage{Products: make([]PublicProduct, 0, limit)}
+	for batch := 0; batch < publicMaxScanBatches && len(page.Products) < limit; batch++ {
+		values, err := service.repository.ListPublished(ctx, storeID, publicScanBatchSize+1, cursor)
+		if err != nil {
+			return PublicPage{}, fmt.Errorf("list published products: %w", err)
+		}
+		if len(values) == 0 {
+			break
+		}
+		hasMore := len(values) > publicScanBatchSize
+		if hasMore {
+			values = values[:publicScanBatchSize]
+		}
+		prices, err := service.prices.ResolveCurrent(ctx, storeID, activeVariantIDs(values))
+		if err != nil {
+			return PublicPage{}, fmt.Errorf("resolve public prices: %w", err)
+		}
+		for index, product := range values {
+			cursor = &PublishedCursor{PublishedAt: *product.PublishedAt, ProductID: product.ID}
+			if projected, ok := publicProduct(product, prices); ok {
+				page.Products = append(page.Products, projected)
+			}
+			if len(page.Products) == limit {
+				if hasMore || index < len(values)-1 {
+					page.NextCursor, err = encodePublishedCursor(*cursor)
+				}
+				return page, err
+			}
+		}
+		if !hasMore {
+			break
+		}
+		if batch == publicMaxScanBatches-1 {
+			page.NextCursor, err = encodePublishedCursor(*cursor)
+			return page, err
+		}
+	}
+	return page, nil
+}
+
+func activeVariantIDs(products []domain.Product) []ids.VariantID {
+	result := make([]ids.VariantID, 0)
+	for _, product := range products {
+		for _, variant := range product.Variants {
+			if variant.Status == domain.ItemActive {
+				result = append(result, variant.ID)
+			}
+		}
+	}
+	return result
+}
+
+func publicProduct(product domain.Product, prices map[ids.VariantID]money.Money) (PublicProduct, bool) {
+	if product.Status != domain.ProductStatusPublished || product.PublishedAt == nil {
+		return PublicProduct{}, false
+	}
+	result := PublicProduct{ProductID: product.ID, Name: product.Name, Slug: product.Slug, Description: product.Description, PublishedAt: *product.PublishedAt, Variants: make([]PublicVariant, 0), Media: make([]PublicMedia, 0, len(product.Media))}
+	for _, variant := range product.Variants {
+		price, ok := prices[variant.ID]
+		if variant.Status != domain.ItemActive || !ok {
+			continue
+		}
+		result.Variants = append(result.Variants, PublicVariant{VariantID: variant.ID, SKU: variant.SKU, OptionValues: variant.OptionValues, WeightGrams: variant.WeightGrams, Dimensions: variant.Dimensions, Price: PublicPrice{AmountMinor: price.AmountMinor, Currency: price.Currency, VATInclusive: true}})
+	}
+	for _, media := range product.Media {
+		if media.ArchivedAt == nil {
+			result.Media = append(result.Media, PublicMedia{ObjectKey: media.ObjectKey, AltText: media.AltText, Position: media.Position})
+		}
+	}
+	return result, len(result.Variants) > 0
+}
+
+func encodePublishedCursor(cursor PublishedCursor) (string, error) {
+	if cursor.PublishedAt.IsZero() || cursor.ProductID == "" {
+		return "", domain.ErrInvalidCatalog
+	}
+	encoded, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(encoded), nil
+}
+
+func decodePublishedCursor(encoded string) (*PublishedCursor, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	if len(encoded) > 512 {
+		return nil, domain.ErrInvalidCatalog
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, domain.ErrInvalidCatalog
+	}
+	var cursor PublishedCursor
+	if err := json.Unmarshal(raw, &cursor); err != nil || cursor.PublishedAt.IsZero() || cursor.ProductID == "" {
+		return nil, domain.ErrInvalidCatalog
+	}
+	if _, err := ids.ParseProductID(cursor.ProductID.String()); err != nil {
+		return nil, domain.ErrInvalidCatalog
+	}
+	return &cursor, nil
 }
 
 func (service Service) CreateCategory(ctx context.Context, storeID ids.StoreID, parentID *ids.CategoryID, name, slug string) (domain.Category, error) {

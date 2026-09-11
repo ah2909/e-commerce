@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +20,19 @@ import (
 	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+type queryCounter struct{ count atomic.Int64 }
+
+func (counter *queryCounter) LogMode(logger.LogLevel) logger.Interface      { return counter }
+func (counter *queryCounter) Info(context.Context, string, ...interface{})  {}
+func (counter *queryCounter) Warn(context.Context, string, ...interface{})  {}
+func (counter *queryCounter) Error(context.Context, string, ...interface{}) {}
+func (counter *queryCounter) Trace(context.Context, time.Time, func() (string, int64), error) {
+	counter.count.Add(1)
+}
 
 func TestRepositoryScopesCatalogAndUniqueValuesByStore(t *testing.T) {
 	pool := catalogPool(t)
@@ -172,8 +185,7 @@ func TestConcurrentProductEditAndArchiveHaveOneWinner(t *testing.T) {
 		_, errorsByCall[1] = repository.ArchiveProduct(context.Background(), pair.A.Store.ID(), created.ID, created.Version, candidate.UpdatedAt.Add(time.Second))
 	}()
 	close(start)
-	waitForBlockedQueries(t, pool, `%catalog_products%`, 1)
-	waitForBlockedQueries(t, pool, `%pg_advisory_xact_lock%`, 1)
+	waitForBlockedQueries(t, pool, `%pg_advisory_xact_lock%`, 2)
 	if err := lockTransaction.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +223,7 @@ func TestMigrationCreatesTenantConstraints(t *testing.T) {
 		t.Fatal("cross-store category assignment succeeded")
 	}
 	var version int64
-	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 3 {
+	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 4 {
 		t.Fatalf("schema version = %d, error = %v", version, err)
 	}
 }
@@ -461,6 +473,33 @@ func TestProductPaginationUsesStableValidatedKeysets(t *testing.T) {
 	tampered, _ := application.EncodeCursor(*cursor)
 	if _, err := service.ListProducts(context.Background(), pair.A.Store.ID(), 2, tampered); !errors.Is(err, application.ErrNotFound) {
 		t.Fatalf("tampered cursor error = %v", err)
+	}
+}
+
+func TestPublishedProductHydrationUsesConstantQueries(t *testing.T) {
+	pool := catalogPool(t)
+	pair := storefixture.NewPair(t, pool)
+	db := gormtest.FromPool(t, pool)
+	setup := catalogpostgres.NewRepository(db)
+	now := time.Now().UTC()
+	for index := range 3 {
+		product := newProduct(t, pair.A.Store.ID(), fmt.Sprintf("published-%d", index), fmt.Sprintf("PUBLISHED-%d", index), fmt.Sprintf("900%d", index), nil, now.Add(time.Duration(index)*time.Second))
+		created, err := setup.CreateProduct(context.Background(), pair.A.Store.ID(), product)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(context.Background(), `UPDATE catalog_products SET status='published', published_at=$1 WHERE store_id=$2::uuid AND product_id=$3::uuid`, now.Add(time.Duration(index)*time.Second), pair.A.Store.ID().String(), created.ID.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counter := &queryCounter{}
+	repository := catalogpostgres.NewRepository(db.Session(&gorm.Session{Logger: counter}))
+	products, err := repository.ListPublished(context.Background(), pair.A.Store.ID(), 3, nil)
+	if err != nil || len(products) != 3 {
+		t.Fatalf("products = %d, error = %v", len(products), err)
+	}
+	if queries := counter.count.Load(); queries != 4 {
+		t.Fatalf("query count = %d, want 4", queries)
 	}
 }
 

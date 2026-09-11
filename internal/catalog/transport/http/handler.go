@@ -33,6 +33,9 @@ type Service interface {
 	GetProduct(context.Context, ids.StoreID, ids.ProductID) (domain.Product, error)
 	ListProducts(context.Context, ids.StoreID, int, string) (application.Page, error)
 	ArchiveProduct(context.Context, ids.StoreID, ids.ProductID, int64) (domain.Product, error)
+	PublishProduct(context.Context, ids.StoreID, ids.ProductID, int64, string) (domain.Product, error)
+	GetPublicProduct(context.Context, ids.StoreID, string) (application.PublicProduct, error)
+	ListPublicProducts(context.Context, ids.StoreID, int, string) (application.PublicPage, error)
 	CreateCategory(context.Context, ids.StoreID, *ids.CategoryID, string, string) (domain.Category, error)
 	ReplaceCategory(context.Context, ids.StoreID, ids.CategoryID, int64, *ids.CategoryID, string, string) (domain.Category, error)
 	ListCategories(context.Context, ids.StoreID) ([]domain.Category, error)
@@ -69,6 +72,23 @@ func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware)
 	router.HEAD(base+"/products/:product_id", chain(handler.getProduct)...)
 	router.PUT(base+"/products/:product_id", chain(handler.replaceProduct)...)
 	router.POST(base+"/products/:product_id/archive", chain(handler.archiveProduct)...)
+
+}
+
+func (handler Handler) RegisterPublication(router gin.IRoutes, hosts tenant.HostMiddleware) {
+	admin := []gin.HandlerFunc{hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(storesdomain.PermissionCatalogManage, handler.logger)}
+	adminChain := func(final gin.HandlerFunc) []gin.HandlerFunc {
+		return append(append([]gin.HandlerFunc{}, admin...), final)
+	}
+	router.POST("/api/v1/admin/catalog/products/:product_id/publish", adminChain(handler.publishProduct)...)
+	public := []gin.HandlerFunc{hosts.TenantGin(), handler.withTimeout()}
+	publicChain := func(final gin.HandlerFunc) []gin.HandlerFunc {
+		return append(append([]gin.HandlerFunc{}, public...), final)
+	}
+	router.GET("/api/v1/catalog/products", publicChain(handler.listPublicProducts)...)
+	router.HEAD("/api/v1/catalog/products", publicChain(handler.listPublicProducts)...)
+	router.GET("/api/v1/catalog/products/:slug", publicChain(handler.getPublicProduct)...)
+	router.HEAD("/api/v1/catalog/products/:slug", publicChain(handler.getPublicProduct)...)
 }
 
 func (handler Handler) withTimeout() gin.HandlerFunc {
@@ -318,6 +338,62 @@ func (handler Handler) archiveProduct(ctx *gin.Context) {
 	}
 	resolved, _ := tenant.FromContext(ctx.Request.Context())
 	product, err := handler.service.ArchiveProduct(ctx.Request.Context(), resolved.StoreID(), id, body.ExpectedVersion)
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	writeJSON(ctx, http.StatusOK, product)
+}
+
+func (handler Handler) publishProduct(ctx *gin.Context) {
+	id, err := ids.ParseProductID(ctx.Param("product_id"))
+	if err != nil {
+		handler.notFound(ctx)
+		return
+	}
+	var body versionRequest
+	if !decode(ctx, &body) {
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	product, err := handler.service.PublishProduct(ctx.Request.Context(), resolved.StoreID(), id, body.ExpectedVersion, httpserver.RequestID(ctx.Request.Context()))
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	writeJSON(ctx, http.StatusOK, product)
+}
+
+func (handler Handler) listPublicProducts(ctx *gin.Context) {
+	limit := 0
+	if raw := ctx.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			handler.invalid(ctx)
+			return
+		}
+		limit = parsed
+	}
+	store, ok := tenant.StoreFromContext(ctx.Request.Context())
+	if !ok {
+		handler.notFound(ctx)
+		return
+	}
+	page, err := handler.service.ListPublicProducts(ctx.Request.Context(), store.StoreID, limit, ctx.Query("cursor"))
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	writeJSON(ctx, http.StatusOK, map[string]any{"products": page.Products, "next_cursor": nullableCursor(page.NextCursor)})
+}
+
+func (handler Handler) getPublicProduct(ctx *gin.Context) {
+	store, ok := tenant.StoreFromContext(ctx.Request.Context())
+	if !ok {
+		handler.notFound(ctx)
+		return
+	}
+	product, err := handler.service.GetPublicProduct(ctx.Request.Context(), store.StoreID, ctx.Param("slug"))
 	if err != nil {
 		handler.writeError(ctx, err)
 		return

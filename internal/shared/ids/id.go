@@ -17,6 +17,8 @@ type ProductID string
 type VariantID string
 type CategoryID string
 type MediaID string
+type PriceListID string
+type EventID string
 
 func ParseStoreID(value string) (StoreID, error) {
 	value, err := parseUUID(value)
@@ -52,22 +54,30 @@ func ParseCategoryID(value string) (CategoryID, error) {
 	return parseTypedID[CategoryID](value, "category")
 }
 func ParseMediaID(value string) (MediaID, error) { return parseTypedID[MediaID](value, "media") }
+func ParsePriceListID(value string) (PriceListID, error) {
+	return parseTypedID[PriceListID](value, "price list")
+}
+func ParseEventID(value string) (EventID, error) { return parseTypedID[EventID](value, "event") }
 
-func NewStoreID() (StoreID, error)       { value, err := newUUID(); return StoreID(value), err }
-func NewUserID() (UserID, error)         { value, err := newUUID(); return UserID(value), err }
-func NewGuestID() (GuestID, error)       { value, err := newUUID(); return GuestID(value), err }
-func NewProductID() (ProductID, error)   { value, err := newUUID(); return ProductID(value), err }
-func NewVariantID() (VariantID, error)   { value, err := newUUID(); return VariantID(value), err }
-func NewCategoryID() (CategoryID, error) { value, err := newUUID(); return CategoryID(value), err }
-func NewMediaID() (MediaID, error)       { value, err := newUUID(); return MediaID(value), err }
+func NewStoreID() (StoreID, error)         { value, err := newUUID(); return StoreID(value), err }
+func NewUserID() (UserID, error)           { value, err := newUUID(); return UserID(value), err }
+func NewGuestID() (GuestID, error)         { value, err := newUUID(); return GuestID(value), err }
+func NewProductID() (ProductID, error)     { value, err := newUUID(); return ProductID(value), err }
+func NewVariantID() (VariantID, error)     { value, err := newUUID(); return VariantID(value), err }
+func NewCategoryID() (CategoryID, error)   { value, err := newUUID(); return CategoryID(value), err }
+func NewMediaID() (MediaID, error)         { value, err := newUUID(); return MediaID(value), err }
+func NewPriceListID() (PriceListID, error) { value, err := newUUID(); return PriceListID(value), err }
+func NewEventID() (EventID, error)         { value, err := newUUID(); return EventID(value), err }
 
-func (id StoreID) String() string    { return string(id) }
-func (id UserID) String() string     { return string(id) }
-func (id GuestID) String() string    { return string(id) }
-func (id ProductID) String() string  { return string(id) }
-func (id VariantID) String() string  { return string(id) }
-func (id CategoryID) String() string { return string(id) }
-func (id MediaID) String() string    { return string(id) }
+func (id StoreID) String() string     { return string(id) }
+func (id UserID) String() string      { return string(id) }
+func (id GuestID) String() string     { return string(id) }
+func (id ProductID) String() string   { return string(id) }
+func (id VariantID) String() string   { return string(id) }
+func (id CategoryID) String() string  { return string(id) }
+func (id MediaID) String() string     { return string(id) }
+func (id PriceListID) String() string { return string(id) }
+func (id EventID) String() string     { return string(id) }
 
 func parseTypedID[T ~string](value, name string) (T, error) {
 	parsed, err := parseUUID(value)

@@ -14,8 +14,8 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
-const CurrentSchemaVersion int64 = 3
-const MinimumCompatibleSchemaVersion int64 = 2
+const CurrentSchemaVersion int64 = 4
+const MinimumCompatibleSchemaVersion int64 = 3
 
 type PoolSettings struct {
 	MaxOpenConnections int

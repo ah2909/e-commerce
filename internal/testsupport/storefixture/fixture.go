@@ -88,6 +88,9 @@ func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 	for _, fixture := range created {
 		storeID := fixture.Store.ID().String()
 		for _, statement := range []string{
+			`DELETE FROM outbox_events WHERE store_id = $1::uuid`,
+			`DELETE FROM pricing_prices WHERE store_id = $1::uuid`,
+			`DELETE FROM pricing_price_lists WHERE store_id = $1::uuid`,
 			`DELETE FROM catalog_media WHERE store_id = $1::uuid`,
 			`DELETE FROM catalog_product_categories WHERE store_id = $1::uuid`,
 			`DELETE FROM catalog_variants WHERE store_id = $1::uuid`,

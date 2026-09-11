@@ -15,6 +15,7 @@ import (
 	catalogapplication "github.com/ah2909/e-commerce/internal/catalog/application"
 	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
 	cataloghttp "github.com/ah2909/e-commerce/internal/catalog/transport/http"
+	eventingpostgres "github.com/ah2909/e-commerce/internal/eventing/infrastructure/postgres"
 	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
 	identitydomain "github.com/ah2909/e-commerce/internal/identity/domain"
 	identitypassword "github.com/ah2909/e-commerce/internal/identity/infrastructure/password"
@@ -35,6 +36,9 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/ratelimit"
 	"github.com/ah2909/e-commerce/internal/platform/redisstore"
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
+	pricingapplication "github.com/ah2909/e-commerce/internal/pricing/application"
+	pricingpostgres "github.com/ah2909/e-commerce/internal/pricing/infrastructure/postgres"
+	pricinghttp "github.com/ah2909/e-commerce/internal/pricing/transport/http"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
@@ -141,8 +145,19 @@ func run() error {
 	if catalogAvailable(schemaVersion) {
 		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
+		if pricingAvailable(schemaVersion) {
+			pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogRepository)
+			pricingService := pricingapplication.NewService(pricingRepository, ids.NewPriceListID, time.Now)
+			publication := catalogpostgres.NewPublicationCoordinator(connection.GORM, pricingRepository, eventingpostgres.NewWriter(), ids.NewEventID)
+			catalogService = catalogService.WithPublication(publication, pricingRepository)
+			pricingHandler := pricinghttp.NewHandler(pricingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
+			pricingHandler.Register(engine, hostMiddleware)
+		}
 		catalogHandler := cataloghttp.NewHandler(catalogService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 		catalogHandler.Register(engine, hostMiddleware)
+		if pricingAvailable(schemaVersion) {
+			catalogHandler.RegisterPublication(engine, hostMiddleware)
+		}
 	} else {
 		logger.Info("Catalog routes await schema migration", "schema_version", schemaVersion)
 	}
@@ -170,6 +185,7 @@ func run() error {
 }
 
 func catalogAvailable(schemaVersion int64) bool { return schemaVersion >= 3 }
+func pricingAvailable(schemaVersion int64) bool { return schemaVersion >= 4 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

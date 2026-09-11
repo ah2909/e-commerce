@@ -31,6 +31,9 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/catalog/categories", "/api/v1/admin/catalog/categories/{category_id}",
 		"/api/v1/admin/catalog/categories/{category_id}/archive", "/api/v1/admin/catalog/products",
 		"/api/v1/admin/catalog/products/{product_id}", "/api/v1/admin/catalog/products/{product_id}/archive",
+		"/api/v1/admin/catalog/products/{product_id}/publish", "/api/v1/admin/pricing/price-lists",
+		"/api/v1/admin/pricing/price-lists/{price_list_id}", "/api/v1/admin/pricing/price-lists/{price_list_id}/archive",
+		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
 	}
 	for _, path := range wantPaths {
 		if _, ok := document.Paths[path]; !ok {
@@ -61,11 +64,47 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/admin/catalog/products", "post", true, []string{"201", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/catalog/products/{product_id}", "put", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/catalog/categories/{category_id}/archive", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/catalog/products/{product_id}/publish", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/pricing/price-lists", "post", true, []string{"201", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/pricing/price-lists/{price_list_id}", "put", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/catalog/products", "get", false, []string{"200", "400", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/catalog/products/{slug}", "get", false, []string{"200", "404", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
 	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/admin/pricing/price-lists", "post", "bearerAuth")
+	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)
 	assertCatalogResponseSchemas(t, document)
+	assertPublicCatalogSchema(t, document)
+}
+
+func assertPublicOperation(t *testing.T, document map[string]any, path, method string) {
+	t.Helper()
+	operation := document["paths"].(map[string]any)[path].(map[string]any)[method].(map[string]any)
+	security := operation["security"].([]any)
+	if len(security) != 0 {
+		t.Errorf("%s %s unexpectedly requires authentication", method, path)
+	}
+}
+
+func assertPublicCatalogSchema(t *testing.T, document map[string]any) {
+	t.Helper()
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	product := schemas["PublicCatalogProduct"].(map[string]any)["properties"].(map[string]any)
+	for _, forbidden := range []string{"store_id", "version", "status", "archived_at", "updated_at"} {
+		if _, exists := product[forbidden]; exists {
+			t.Errorf("public product exposes %s", forbidden)
+		}
+	}
+	variant := schemas["PublicCatalogVariant"].(map[string]any)["properties"].(map[string]any)
+	if _, exists := variant["barcode"]; exists {
+		t.Error("public variant exposes barcode")
+	}
+	price := schemas["PublicCatalogPrice"].(map[string]any)["properties"].(map[string]any)
+	if price["vat_inclusive"].(map[string]any)["const"] != true || price["currency"].(map[string]any)["const"] != "VND" {
+		t.Fatalf("public price semantics are incomplete")
+	}
 }
 
 func assertCatalogResponseSchemas(t *testing.T, document map[string]any) {

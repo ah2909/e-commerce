@@ -27,6 +27,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [003 Store context](archive/003-store-context.md) | Store aggregate, tenant context, persistence, and isolation baseline |
 | [007 Gin and GORM migration](archive/007-adopt-gin-gorm-project-wide.md) | Native Gin transport and GORM persistence adapters with preserved schema, API, tenant, and concurrency behavior |
 | [008 Catalog authoring foundation](archive/008-catalog-authoring-foundation.md) | Tenant-safe draft Catalog authoring, migration 3, admin APIs, and concurrency/isolation evidence |
+| [009 VND pricing and Catalog publication](archive/009-vnd-pricing-catalog-publication.md) | Tenant-safe VND price lists, price-gated publication, public priced Catalog reads, and atomic outbox persistence |
 
 ## Starting work
 

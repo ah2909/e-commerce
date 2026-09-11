@@ -2,8 +2,8 @@
 
 ## Snapshot
 
-- Assessed: 2026-09-10
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007 and 008
+- Assessed: 2026-09-11
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, and 009
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -12,6 +12,8 @@ This is the authoritative current-state summary. Detailed historical evidence re
 Task 007 migrated production API routing and transport middleware to Gin and production repositories and cross-module transactions to GORM without changing Goose schema version 2. Independent architecture and security reviews passed after compatibility and hardening corrections, and final verification passed on 2026-09-10.
 
 Task 008 completed tenant-scoped draft Catalog authoring. Both independent reviews and final verification passed on 2026-09-10.
+
+Task 009 completed VND storefront price lists, deterministic current-price resolution, price-gated Catalog publication with an atomic outbox fact, and public priced Catalog reads. Both independent reviews and final verification passed on 2026-09-11.
 
 ## Status meanings
 
@@ -31,8 +33,8 @@ Task 008 completed tenant-scoped draft Catalog authoring. Both independent revie
 | Tenant context | Implemented, changes required | Store persistence, tenant middleware, and the task 003 isolation baseline exist. Task 004 changed host and session behavior; its two remaining medium findings are explicitly skipped and retained as accepted risks below. Current routing implements shared-base-domain subdomains, not the target customer-managed exact-host single-store mode. |
 | Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed; the store-suspension/session race remains an explicitly accepted risk. |
 | Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission are explicitly accepted unresolved risks. |
-| Catalog | Partially implemented | Accepted [task 008](../tasks/archive/008-catalog-authoring-foundation.md) adds draft product, variant, category, and media authoring with tenant-scoped migration 3, optimistic aggregate writes, admin APIs, and keyset pagination. Publication and public reads remain intentionally blocked until Pricing supplies current-price readiness. |
-| Pricing and coupons | Not started | No Money value object, Pricing module, price/coupon schema, or contract exists. |
+| Catalog | Implemented and accepted | Accepted [task 008](../tasks/archive/008-catalog-authoring-foundation.md) provides authoring. Accepted [task 009](../tasks/archive/009-vnd-pricing-catalog-publication.md) adds draft-to-published transition, price readiness, public priced list/detail reads, and transactional publication intent. |
+| Pricing and coupons | Partially implemented | Task 009 implements integer VND Money, storefront price-list aggregates, deterministic current-price selection, admin APIs, and tenant-scoped persistence. Coupons and redemption accounting remain unimplemented. |
 | Inventory | Not started | No stock item, reservation, ledger, expiry worker, or concurrency implementation exists. |
 | Customers and carts | Not started | Guest identity exists, but customer profiles, addresses, carts, and cart ownership do not. |
 | Checkout and orders | Not started | No checkout transaction, order snapshots, state machine, idempotency record, or guest order grant exists. |
@@ -40,7 +42,7 @@ Task 008 completed tenant-scoped draft Catalog authoring. Both independent revie
 | MoMo payments | Not started | No provider adapter, signed webhook, attempt, receipt, or automatic confirmation implementation exists. |
 | Cancellation and refunds | Not started | No order cancellation or full-refund workflow exists. |
 | Shipping and fulfillment | Not started | No flat/free shipping rule, shipment, carrier, or tracking implementation exists. |
-| Event workers | Not started | Kafka is available in local Compose and a worker process starts, but no outbox/inbox schema, publisher, consumer, or event contract implementation exists. |
+| Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
 | Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
 
 ## Implemented database schema
@@ -63,7 +65,13 @@ Task 008 completed tenant-scoped draft Catalog authoring. Both independent revie
 - scoped uniqueness for product/category slugs, variant SKUs, and optional barcodes
 - optimistic versions, retained archive state, physical measurements in grams/millimetres, and keyset query indexes
 
-The schema intentionally does not include platform operators. It also does not include Pricing, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, outbox, or inbox tables.
+### Migration 00004
+
+- tenant-owned storefront VND price lists and variant prices with composite Catalog foreign keys
+- validity, priority, lifecycle, optimistic-version, amount, and current-price query constraints/indexes
+- Eventing-owned tenant-scoped outbox facts with aggregate-version deduplication and a future publisher claim index
+
+The schema intentionally does not include platform operators. It also does not include coupons, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -91,7 +99,7 @@ These positives do not waive the blockers above.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`; it does not add a public Catalog route.
 
-Public Catalog, pricing, inventory, customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints are absent because those slices are not implemented.
+Task 009 adds owner/admin price-list administration, authenticated Catalog publication, and unauthenticated host-scoped public Catalog list/detail endpoints. Public responses expose only published products and active variants with a current VAT-inclusive VND price. Coupons, inventory availability, customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints remain absent.
 
 ## Verification evidence
 
@@ -123,8 +131,10 @@ Task 007 final verification on 2026-09-10: `make verify` passed formatting, zero
 
 Task 008 final verification on 2026-09-10: both independent reviews passed with no findings, then `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 3, and vulnerability scanning. The scan reported zero vulnerabilities in called code or imported packages. Focused PostgreSQL evidence also covered exact migration definitions, populated version-2 upgrade and repeat, tenant isolation, aggregate atomicity, hierarchy locking, and synchronized edit/archive races.
 
+Task 009 final verification on 2026-09-11: both independent reviews passed after database-time, concurrency evidence, conflict mapping, and public-query amplification corrections. The complete rerun of `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 4, and vulnerability scanning. The scan reported zero vulnerabilities in called code or imported packages.
+
 ## Required next work
 
-1. Add Pricing-backed publication and public Catalog reads without weakening the current-price requirement.
+1. Add coupons and redemption accounting without weakening authoritative base-price selection.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

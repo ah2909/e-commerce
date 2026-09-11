@@ -35,3 +35,12 @@ func TestCatalogRoutesRequireSchemaThree(t *testing.T) {
 		t.Fatal("Catalog was unavailable at migration 3")
 	}
 }
+
+func TestPricingRoutesRequireSchemaFour(t *testing.T) {
+	if pricingAvailable(3) {
+		t.Fatal("Pricing was available before migration 4")
+	}
+	if !pricingAvailable(4) {
+		t.Fatal("Pricing was unavailable at migration 4")
+	}
+}

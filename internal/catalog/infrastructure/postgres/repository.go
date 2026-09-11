@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/ah2909/e-commerce/internal/catalog/application"
@@ -180,21 +181,76 @@ func (repository *Repository) ListProducts(ctx context.Context, storeID ids.Stor
 		if err := query.Order("updated_at DESC, product_id DESC").Limit(limit).Find(&rows).Error; err != nil {
 			return fmt.Errorf("list product rows: %w", err)
 		}
-		for _, row := range rows {
-			product, err := loadProduct(tx, storeID, ids.ProductID(row.ProductID))
-			if err != nil {
-				return err
-			}
-			products = append(products, product)
-		}
-		return nil
+		var err error
+		products, err = loadProducts(tx, storeID, rows)
+		return err
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return products, err
+}
+
+func loadProducts(tx *gorm.DB, storeID ids.StoreID, rows []productRow) ([]domain.Product, error) {
+	products := make([]domain.Product, len(rows))
+	indexes := make(map[string]int, len(rows))
+	productIDs := make([]string, len(rows))
+	for index, row := range rows {
+		id, err := ids.ParseProductID(row.ProductID)
+		if err != nil {
+			return nil, err
+		}
+		products[index] = domain.Product{StoreID: storeID, ID: id, Name: row.Name, Slug: row.Slug, Description: row.Description, Status: domain.ProductStatus(row.Status), Version: row.Version, PublishedAt: row.PublishedAt, ArchivedAt: row.ArchivedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Variants: make([]domain.Variant, 0), CategoryIDs: make([]ids.CategoryID, 0), Media: make([]domain.MediaReference, 0)}
+		indexes[row.ProductID], productIDs[index] = index, row.ProductID
+	}
+	if len(productIDs) == 0 {
+		return products, nil
+	}
+	var variants []variantRow
+	if err := tx.Where("store_id = ? AND product_id IN ?", storeID.String(), productIDs).Order("product_id, created_at, variant_id").Find(&variants).Error; err != nil {
+		return nil, fmt.Errorf("load public variants: %w", err)
+	}
+	for _, value := range variants {
+		id, err := ids.ParseVariantID(value.VariantID)
+		if err != nil {
+			return nil, err
+		}
+		options := map[string]string{}
+		if err := json.Unmarshal(value.OptionValues, &options); err != nil {
+			return nil, err
+		}
+		productID := products[indexes[value.ProductID]].ID
+		products[indexes[value.ProductID]].Variants = append(products[indexes[value.ProductID]].Variants, domain.Variant{StoreID: storeID, ID: id, ProductID: productID, SKU: value.SKU, Barcode: value.Barcode, OptionValues: options, WeightGrams: value.WeightGrams, Dimensions: domain.Dimensions{LengthMM: value.LengthMM, WidthMM: value.WidthMM, HeightMM: value.HeightMM}, Status: domain.ItemStatus(value.Status), Version: value.Version, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, ArchivedAt: value.ArchivedAt})
+	}
+	var assignments []productCategoryRow
+	if err := tx.Where("store_id = ? AND product_id IN ?", storeID.String(), productIDs).Order("product_id, category_id").Find(&assignments).Error; err != nil {
+		return nil, fmt.Errorf("load public categories: %w", err)
+	}
+	for _, value := range assignments {
+		id, err := ids.ParseCategoryID(value.CategoryID)
+		if err != nil {
+			return nil, err
+		}
+		products[indexes[value.ProductID]].CategoryIDs = append(products[indexes[value.ProductID]].CategoryIDs, id)
+	}
+	var media []mediaRow
+	if err := tx.Where("store_id = ? AND product_id IN ? AND archived_at IS NULL", storeID.String(), productIDs).Order("product_id, position").Find(&media).Error; err != nil {
+		return nil, fmt.Errorf("load public media: %w", err)
+	}
+	for _, value := range media {
+		id, err := ids.ParseMediaID(value.MediaID)
+		if err != nil {
+			return nil, err
+		}
+		productID := products[indexes[value.ProductID]].ID
+		products[indexes[value.ProductID]].Media = append(products[indexes[value.ProductID]].Media, domain.MediaReference{StoreID: storeID, ID: id, ProductID: productID, ObjectKey: value.ObjectKey, AltText: value.AltText, Position: value.Position, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, ArchivedAt: value.ArchivedAt})
+	}
+	return products, nil
 }
 
 func (repository *Repository) ArchiveProduct(ctx context.Context, storeID ids.StoreID, productID ids.ProductID, expectedVersion int64, now time.Time) (domain.Product, error) {
 	var archived domain.Product
 	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockHierarchy(tx, storeID); err != nil {
+			return err
+		}
 		result := tx.Model(&productRow{}).Where("store_id = ? AND product_id = ? AND version = ? AND status = 'draft'", storeID.String(), productID.String(), expectedVersion).Updates(map[string]any{"status": "archived", "archived_at": now, "updated_at": now, "version": expectedVersion + 1})
 		if result.Error != nil {
 			return classify(result.Error)
@@ -216,6 +272,63 @@ func (repository *Repository) ArchiveProduct(ctx context.Context, storeID ids.St
 		return domain.Product{}, err
 	}
 	return archived, nil
+}
+
+func (repository *Repository) GetPublishedBySlug(ctx context.Context, storeID ids.StoreID, slug string) (domain.Product, error) {
+	var product domain.Product
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row productRow
+		if err := tx.Where("store_id = ? AND slug = ? AND status = 'published'", storeID.String(), slug).First(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return application.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		var err error
+		product, err = loadProduct(tx, storeID, ids.ProductID(row.ProductID))
+		return err
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return product, err
+}
+
+func (repository *Repository) ListPublished(ctx context.Context, storeID ids.StoreID, limit int, cursor *application.PublishedCursor) ([]domain.Product, error) {
+	products := make([]domain.Product, 0)
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("store_id = ? AND status = 'published'", storeID.String())
+		if cursor != nil {
+			var anchors int64
+			if err := tx.Model(&productRow{}).Where("store_id = ? AND product_id = ? AND published_at = ? AND status = 'published'", storeID.String(), cursor.ProductID.String(), cursor.PublishedAt).Count(&anchors).Error; err != nil {
+				return err
+			}
+			if anchors != 1 {
+				return application.ErrNotFound
+			}
+			query = query.Where("(published_at, product_id) < (?, ?::uuid)", cursor.PublishedAt, cursor.ProductID.String())
+		}
+		var rows []productRow
+		if err := query.Order("published_at DESC, product_id DESC").Limit(limit).Find(&rows).Error; err != nil {
+			return fmt.Errorf("list published products: %w", err)
+		}
+		var err error
+		products, err = loadProducts(tx, storeID, rows)
+		return err
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return products, err
+}
+
+func (repository *Repository) LockActiveVariants(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, variantIDs []ids.VariantID) (bool, error) {
+	values := make([]string, len(variantIDs))
+	for index, id := range variantIDs {
+		values[index] = id.String()
+	}
+	sort.Strings(values)
+	var rows []variantRow
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).Where("store_id = ? AND variant_id IN ? AND status = 'active'", storeID.String(), values).Order("variant_id").Find(&rows).Error; err != nil {
+		return false, fmt.Errorf("lock active catalog variants: %w", err)
+	}
+	if len(rows) != len(values) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (repository *Repository) CreateCategory(ctx context.Context, storeID ids.StoreID, category domain.Category) (domain.Category, error) {

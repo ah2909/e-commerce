@@ -205,6 +205,15 @@ func (product Product) Archived(now time.Time) (Product, error) {
 	return product, nil
 }
 
+func (product Product) Published(now time.Time) (Product, error) {
+	if product.Status != ProductStatusDraft {
+		return Product{}, ErrInvalidCatalog
+	}
+	published := now.UTC()
+	product.Status, product.PublishedAt, product.UpdatedAt, product.Version = ProductStatusPublished, &published, published, product.Version+1
+	return product, nil
+}
+
 func NewCategory(storeID ids.StoreID, id ids.CategoryID, parentID *ids.CategoryID, name, slug string, now time.Time) (Category, error) {
 	category := Category{StoreID: storeID, ID: id, ParentID: parentID, Name: normalizeText(name), Slug: normalizeSlug(slug), Status: ItemActive, Version: 1, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 	if err := category.validate(); err != nil {
