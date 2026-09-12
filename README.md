@@ -82,6 +82,7 @@ Important boundaries:
 - `CORS_ALLOWED_ORIGINS` is a comma-separated exact HTTP(S) origin allowlist for browser frontends; empty disables cross-origin access and wildcards are rejected.
 - `DATABASE_URL` is runtime state; `TEST_DATABASE_URL` must identify a loopback database ending in `_test` before integration mutation is allowed.
 - `INVENTORY_EXPIRY_BATCH` and `INVENTORY_EXPIRY_POLL` bound reservation-expiry work after migration 5.
+- `CART_EXPIRY_BATCH` and `CART_EXPIRY_POLL` bound inactive-cart expiry work after migration 6.
 - Google or Facebook login remains disabled unless its complete provider configuration is present and valid.
 - Provider, database, Redis, and token configuration must come from deployment secrets/configuration, never committed production values.
 - Future store-owned VietQR/MoMo secrets require encrypted persistence and an external key; that payment functionality is not implemented yet.

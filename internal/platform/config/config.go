@@ -38,6 +38,8 @@ const (
 	maxRateWindow                  = 24 * time.Hour
 	defaultInventoryExpiryPoll     = 5 * time.Second
 	maxInventoryExpiryPoll         = time.Minute
+	defaultCartExpiryPoll          = time.Minute
+	maxCartExpiryPoll              = 15 * time.Minute
 )
 
 type RateLimit struct {
@@ -87,6 +89,8 @@ type Config struct {
 	SocialReturnPaths          []string
 	InventoryExpiryBatch       int
 	InventoryExpiryPoll        time.Duration
+	CartExpiryBatch            int
+	CartExpiryPoll             time.Duration
 }
 
 type LookupFunc func(string) (string, bool)
@@ -227,6 +231,14 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cartExpiryBatch, err := integer(lookup, "CART_EXPIRY_BATCH", 50, 1, 100)
+	if err != nil {
+		return Config{}, err
+	}
+	cartExpiryPoll, err := duration(lookup, "CART_EXPIRY_POLL", defaultCartExpiryPoll, maxCartExpiryPoll)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
@@ -264,6 +276,8 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		SocialReturnPaths:          returnPaths,
 		InventoryExpiryBatch:       inventoryExpiryBatch,
 		InventoryExpiryPoll:        inventoryExpiryPoll,
+		CartExpiryBatch:            cartExpiryBatch,
+		CartExpiryPoll:             cartExpiryPoll,
 	}, nil
 }
 

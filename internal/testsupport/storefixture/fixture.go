@@ -99,6 +99,10 @@ func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 		}
 		failed := false
 		for _, statement := range []string{
+			`DELETE FROM cart_lines WHERE store_id = $1::uuid`,
+			`DELETE FROM carts WHERE store_id = $1::uuid`,
+			`DELETE FROM customer_addresses WHERE store_id = $1::uuid`,
+			`DELETE FROM customers WHERE store_id = $1::uuid`,
 			`DELETE FROM outbox_events WHERE store_id = $1::uuid`,
 			`DELETE FROM inventory_ledger_entries WHERE store_id = $1::uuid`,
 			`DELETE FROM inventory_reservations WHERE store_id = $1::uuid`,

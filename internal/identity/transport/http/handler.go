@@ -117,7 +117,40 @@ func (handler Handler) withTimeout() gin.HandlerFunc {
 	}
 }
 
-func (handler Handler) AuthenticateUser() gin.HandlerFunc { return handler.authenticateUser() }
+func (handler Handler) AuthenticateUser() gin.HandlerFunc    { return handler.authenticateUser() }
+func (handler Handler) AuthenticateShopper() gin.HandlerFunc { return handler.authenticateShopper() }
+
+func (handler Handler) authenticateShopper() gin.HandlerFunc {
+	return func(request *gin.Context) {
+		w, r := request.Writer, request.Request
+		store, hasStore := tenant.StoreFromContext(r.Context())
+		value, ok := bearer(r)
+		if !hasStore || !ok {
+			handler.authError(w, r, application.ErrUnauthenticated)
+			request.Abort()
+			return
+		}
+		user, sessionID, err := handler.service.AuthenticateUser(r.Context(), store.StoreID, value)
+		if err == nil {
+			request.Request = r.WithContext(authn.WithPrincipal(r.Context(), authn.NewUserPrincipal(store.StoreID.String(), user.ID.String(), sessionID)))
+			request.Next()
+			return
+		}
+		if !errors.Is(err, application.ErrUnauthenticated) {
+			handler.authError(w, r, err)
+			request.Abort()
+			return
+		}
+		guest, err := handler.service.AuthenticateGuest(r.Context(), store.StoreID, value)
+		if err != nil {
+			handler.guestError(w, r, err)
+			request.Abort()
+			return
+		}
+		request.Request = r.WithContext(authn.WithPrincipal(r.Context(), authn.NewGuestPrincipal(store.StoreID.String(), guest.GuestID.String(), guest.Token.SessionID)))
+		request.Next()
+	}
+}
 
 func (handler Handler) register(ctx *gin.Context) {
 	w, r := ctx.Writer, ctx.Request

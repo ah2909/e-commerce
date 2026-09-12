@@ -35,6 +35,8 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/pricing/price-lists/{price_list_id}", "/api/v1/admin/pricing/price-lists/{price_list_id}/archive",
 		"/api/v1/admin/inventory/stock-items", "/api/v1/admin/inventory/stock-items/{variant_id}",
 		"/api/v1/admin/inventory/stock-items/{variant_id}/adjustments",
+		"/api/v1/customer/profile", "/api/v1/customer/addresses", "/api/v1/customer/addresses/{address_id}",
+		"/api/v1/cart", "/api/v1/cart/lines/{variant_id}",
 		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
 	}
 	for _, path := range wantPaths {
@@ -73,15 +75,27 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/admin/inventory/stock-items/{variant_id}/adjustments", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/catalog/products", "get", false, []string{"200", "400", "404", "503"})
 	assertOperationContract(t, document, "/api/v1/catalog/products/{slug}", "get", false, []string{"200", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/customer/profile", "put", true, []string{"200", "400", "401", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/customer/addresses", "post", true, []string{"201", "400", "401", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/customer/addresses/{address_id}", "put", true, []string{"200", "400", "401", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/cart", "post", false, []string{"200", "201", "401", "503"})
+	assertOperationContract(t, document, "/api/v1/cart/lines/{variant_id}", "put", true, []string{"200", "400", "401", "404", "409", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
 	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/pricing/price-lists", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/inventory/stock-items/{variant_id}/adjustments", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/customer/profile", "put", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/cart", "post", "bearerAuth")
 	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)
 	assertCatalogResponseSchemas(t, document)
 	assertPublicCatalogSchema(t, document)
+	for _, name := range []string{"CustomerProfile", "CustomerAddress", "Cart", "CartLine"} {
+		if document["components"].(map[string]any)["schemas"].(map[string]any)[name].(map[string]any)["additionalProperties"] != false {
+			t.Errorf("%s is not a closed response schema", name)
+		}
+	}
 }
 
 func assertPublicOperation(t *testing.T, document map[string]any, path, method string) {

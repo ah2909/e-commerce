@@ -11,6 +11,7 @@ import (
 	"time"
 
 	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	cartspostgres "github.com/ah2909/e-commerce/internal/carts/infrastructure/postgres"
 	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
 	eventingpostgres "github.com/ah2909/e-commerce/internal/eventing/infrastructure/postgres"
 	inventoryapplication "github.com/ah2909/e-commerce/internal/inventory/application"
@@ -53,6 +54,9 @@ func run() error {
 	}
 
 	logger.Info("worker started", "environment", cfg.AppEnv, "kafka_broker_count", len(cfg.KafkaBrokers))
+	if schemaVersion >= 6 {
+		go runCartExpiry(ctx, cartspostgres.NewRepository(connection.GORM), cfg.CartExpiryBatch, cfg.CartExpiryPoll, cfg.DependencyTimeout, logger)
+	}
 	if schemaVersion >= 5 {
 		repository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
 		service := inventoryapplication.NewService(repository)
@@ -62,6 +66,33 @@ func run() error {
 	}
 	logger.Info("worker stopped")
 	return nil
+}
+
+type cartExpiryProcessor interface {
+	ExpireDue(context.Context, int) (int, error)
+}
+
+func runCartExpiry(ctx context.Context, processor cartExpiryProcessor, batch int, poll, timeout time.Duration, logger *slog.Logger) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		operationCtx, cancel := context.WithTimeout(ctx, timeout)
+		processed, err := processor.ExpireDue(operationCtx, batch)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("cart expiry failed", "error", err)
+		} else if processed > 0 {
+			logger.Info("carts expired", "count", processed)
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 type expiryProcessor interface {

@@ -36,6 +36,8 @@ func TestLoadFrom(t *testing.T) {
 	values["SOCIAL_RETURN_PATHS"] = "/auth/complete,/settings/security"
 	values["INVENTORY_EXPIRY_BATCH"] = "25"
 	values["INVENTORY_EXPIRY_POLL"] = "2s"
+	values["CART_EXPIRY_BATCH"] = "30"
+	values["CART_EXPIRY_POLL"] = "3m"
 
 	got, err := LoadFrom(mapLookup(values))
 	if err != nil {
@@ -74,6 +76,9 @@ func TestLoadFrom(t *testing.T) {
 	if got.InventoryExpiryBatch != 25 || got.InventoryExpiryPoll != 2*time.Second {
 		t.Fatalf("LoadFrom() inventory worker fields = %#v", got)
 	}
+	if got.CartExpiryBatch != 30 || got.CartExpiryPoll != 3*time.Minute {
+		t.Fatalf("LoadFrom() cart worker fields = %#v", got)
+	}
 }
 
 func TestLoadFromDefaults(t *testing.T) {
@@ -98,6 +103,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	}
 	if got.InventoryExpiryBatch != 50 || got.InventoryExpiryPoll != defaultInventoryExpiryPoll {
 		t.Fatalf("LoadFrom() inventory worker defaults = %#v", got)
+	}
+	if got.CartExpiryBatch != 50 || got.CartExpiryPoll != defaultCartExpiryPoll {
+		t.Fatalf("LoadFrom() cart worker defaults = %#v", got)
 	}
 }
 

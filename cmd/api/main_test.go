@@ -53,3 +53,12 @@ func TestInventoryRoutesRequireSchemaFive(t *testing.T) {
 		t.Fatal("Inventory was unavailable at migration 5")
 	}
 }
+
+func TestCustomerAndCartRoutesRequireSchemaSix(t *testing.T) {
+	if customersAvailable(5) {
+		t.Fatal("Customer and Cart routes were available before migration 6")
+	}
+	if !customersAvailable(6) {
+		t.Fatal("Customer and Cart routes were unavailable at migration 6")
+	}
+}

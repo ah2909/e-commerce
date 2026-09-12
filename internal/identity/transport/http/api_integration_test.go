@@ -26,6 +26,7 @@ import (
 	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
 	onboardinghttp "github.com/ah2909/e-commerce/internal/onboarding/transport/http"
 	"github.com/ah2909/e-commerce/internal/platform/adminauth"
+	"github.com/ah2909/e-commerce/internal/platform/authn"
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/ratelimit"
@@ -36,6 +37,7 @@ import (
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	storeshttp "github.com/ah2909/e-commerce/internal/stores/transport/http"
 	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -65,6 +67,14 @@ func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	memberships := storesapplication.NewMembershipManager(stores, identities, time.Now)
 	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(stores), logger, time.Second)
 	storeshttp.NewHandler(memberships, identityHandler.AuthenticateUser(), tenantMiddleware, logger).Register(mux, hosts)
+	mux.GET("/shopper-probe", hosts.TenantGin(), identityHandler.AuthenticateShopper(), func(ctx *gin.Context) {
+		principal, ok := authn.FromContext(ctx.Request.Context())
+		if !ok {
+			ctx.Status(http.StatusInternalServerError)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"kind": principal.Kind()})
+	})
 	server := http.Handler(mux)
 
 	suffix := time.Now().UnixNano()
@@ -86,6 +96,11 @@ func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	if viewA.Code != http.StatusOK || crossUser.Code != http.StatusUnauthorized {
 		t.Fatalf("user host scope statuses = same %d, cross %d", viewA.Code, crossUser.Code)
 	}
+	shopperUser := request(t, server, http.MethodGet, "/shopper-probe", nil, storeA.AccessToken, storeA.Subdomain+".example.test")
+	shopperCrossUser := request(t, server, http.MethodGet, "/shopper-probe", nil, storeA.AccessToken, storeB.Subdomain+".example.test")
+	if shopperUser.Code != http.StatusOK || !bytes.Contains(shopperUser.Body.Bytes(), []byte(`"kind":"user"`)) || shopperCrossUser.Code != http.StatusUnauthorized {
+		t.Fatalf("shopper user statuses = same %d %s, cross %d", shopperUser.Code, shopperUser.Body.String(), shopperCrossUser.Code)
+	}
 	headUser := request(t, server, http.MethodHead, "/api/v1/store", nil, storeA.AccessToken, storeA.Subdomain+".example.test")
 	headAnonymous := request(t, server, http.MethodHead, "/api/v1/store", nil, "", storeA.Subdomain+".example.test")
 	wrongMethod := request(t, server, http.MethodPut, "/api/v1/store", nil, "", storeA.Subdomain+".example.test")
@@ -105,6 +120,11 @@ func TestTenantHostIdentityStoreAndGuestHTTPFlow(t *testing.T) {
 	crossGuest := request(t, server, http.MethodGet, "/api/v1/guest-sessions/current", nil, guestSession.AccessToken, storeB.Subdomain+".example.test")
 	if sameGuest.Code != http.StatusOK || crossGuest.Code != http.StatusUnauthorized {
 		t.Fatalf("guest host scope statuses = same %d, cross %d", sameGuest.Code, crossGuest.Code)
+	}
+	shopperGuest := request(t, server, http.MethodGet, "/shopper-probe", nil, guestSession.AccessToken, storeA.Subdomain+".example.test")
+	shopperCrossGuest := request(t, server, http.MethodGet, "/shopper-probe", nil, guestSession.AccessToken, storeB.Subdomain+".example.test")
+	if shopperGuest.Code != http.StatusOK || !bytes.Contains(shopperGuest.Body.Bytes(), []byte(`"kind":"guest"`)) || shopperCrossGuest.Code != http.StatusUnauthorized {
+		t.Fatalf("shopper guest statuses = same %d %s, cross %d", shopperGuest.Code, shopperGuest.Body.String(), shopperCrossGuest.Code)
 	}
 }
 

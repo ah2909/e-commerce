@@ -42,6 +42,10 @@ type Repository interface {
 
 type Service struct{ repository Repository }
 
+type quantityResolver interface {
+	ResolveAvailableQuantities(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]int64, error)
+}
+
 func NewService(repository Repository) Service { return Service{repository: repository} }
 
 func (service Service) Get(ctx context.Context, storeID ids.StoreID, variantID ids.VariantID) (domain.StockItem, error) {
@@ -95,6 +99,14 @@ func (service Service) ResolveAvailability(ctx context.Context, storeID ids.Stor
 		return nil, domain.ErrInvalidInventory
 	}
 	return service.repository.ResolveAvailability(ctx, storeID, variants)
+}
+
+func (service Service) ResolveAvailableQuantities(ctx context.Context, storeID ids.StoreID, variants []ids.VariantID) (map[ids.VariantID]int64, error) {
+	resolver, ok := service.repository.(quantityResolver)
+	if !ok || storeID == "" || len(variants) == 0 || len(variants) > 100 {
+		return nil, domain.ErrInvalidInventory
+	}
+	return resolver.ResolveAvailableQuantities(ctx, storeID, variants)
 }
 
 func (service Service) Reserve(ctx context.Context, storeID ids.StoreID, orderID ids.OrderID, allocations []domain.Allocation, correlationID string) ([]domain.Reservation, error) {

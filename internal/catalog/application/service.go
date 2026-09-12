@@ -75,6 +75,17 @@ type PublicPage struct {
 	NextCursor string
 }
 
+type CartVariant struct {
+	VariantID    ids.VariantID
+	ProductName  string
+	SKU          string
+	OptionValues map[string]string
+}
+
+type CartVariantResolver interface {
+	ResolveCartVariants(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]CartVariant, error)
+}
+
 type Repository interface {
 	CreateProduct(context.Context, ids.StoreID, domain.Product) (domain.Product, error)
 	ReplaceProduct(context.Context, ids.StoreID, ids.ProductID, int64, domain.Product) (domain.Product, error)
@@ -129,6 +140,14 @@ func (service Service) WithPublication(publisher Publisher, prices PriceResolver
 func (service Service) WithAvailability(resolver AvailabilityResolver) Service {
 	service.availability = resolver
 	return service
+}
+
+func (service Service) ResolveCartVariants(ctx context.Context, storeID ids.StoreID, variants []ids.VariantID) (map[ids.VariantID]CartVariant, error) {
+	resolver, ok := service.repository.(CartVariantResolver)
+	if !ok || storeID == "" || len(variants) == 0 || len(variants) > 100 {
+		return nil, domain.ErrInvalidCatalog
+	}
+	return resolver.ResolveCartVariants(ctx, storeID, variants)
 }
 
 func DefaultIDGenerator() IDGenerator {

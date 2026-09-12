@@ -12,9 +12,15 @@ import (
 	"time"
 
 	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
+	cartsapplication "github.com/ah2909/e-commerce/internal/carts/application"
+	cartspostgres "github.com/ah2909/e-commerce/internal/carts/infrastructure/postgres"
+	cartshttp "github.com/ah2909/e-commerce/internal/carts/transport/http"
 	catalogapplication "github.com/ah2909/e-commerce/internal/catalog/application"
 	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
 	cataloghttp "github.com/ah2909/e-commerce/internal/catalog/transport/http"
+	customersapplication "github.com/ah2909/e-commerce/internal/customers/application"
+	customerspostgres "github.com/ah2909/e-commerce/internal/customers/infrastructure/postgres"
+	customershttp "github.com/ah2909/e-commerce/internal/customers/transport/http"
 	eventingpostgres "github.com/ah2909/e-commerce/internal/eventing/infrastructure/postgres"
 	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
 	identitydomain "github.com/ah2909/e-commerce/internal/identity/domain"
@@ -148,9 +154,11 @@ func run() error {
 	if catalogAvailable(schemaVersion) {
 		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
+		var pricingService pricingapplication.Service
+		var inventoryService inventoryapplication.Service
 		if pricingAvailable(schemaVersion) {
 			pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker())
-			pricingService := pricingapplication.NewService(pricingRepository, ids.NewPriceListID, time.Now)
+			pricingService = pricingapplication.NewService(pricingRepository, ids.NewPriceListID, time.Now)
 			publication := catalogpostgres.NewPublicationCoordinator(connection.GORM, pricingRepository, eventingpostgres.NewWriter(), ids.NewEventID)
 			catalogService = catalogService.WithPublication(publication, pricingRepository)
 			pricingHandler := pricinghttp.NewHandler(pricingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
@@ -158,7 +166,7 @@ func run() error {
 		}
 		if inventoryAvailable(schemaVersion) {
 			inventoryRepository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
-			inventoryService := inventoryapplication.NewService(inventoryRepository)
+			inventoryService = inventoryapplication.NewService(inventoryRepository)
 			catalogService = catalogService.WithAvailability(inventoryService)
 			inventoryHandler := inventoryhttp.NewHandler(inventoryService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 			inventoryHandler.Register(engine, hostMiddleware)
@@ -167,6 +175,12 @@ func run() error {
 		catalogHandler.Register(engine, hostMiddleware)
 		if pricingAvailable(schemaVersion) {
 			catalogHandler.RegisterPublication(engine, hostMiddleware)
+		}
+		if customersAvailable(schemaVersion) {
+			customerService := customersapplication.NewService(customerspostgres.NewRepository(connection.GORM))
+			customershttp.NewHandler(customerService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+			cartService := cartsapplication.NewService(cartspostgres.NewRepository(connection.GORM), catalogService, pricingService, inventoryService)
+			cartshttp.NewHandler(cartService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
 		}
 	} else {
 		logger.Info("Catalog routes await schema migration", "schema_version", schemaVersion)
@@ -197,6 +211,7 @@ func run() error {
 func catalogAvailable(schemaVersion int64) bool   { return schemaVersion >= 3 }
 func pricingAvailable(schemaVersion int64) bool   { return schemaVersion >= 4 }
 func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
+func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

@@ -151,7 +151,19 @@ func (repository *Repository) List(ctx context.Context, storeID ids.StoreID, lim
 }
 
 func (repository *Repository) ResolveAvailability(ctx context.Context, storeID ids.StoreID, variants []ids.VariantID) (map[ids.VariantID]bool, error) {
+	quantities, err := repository.ResolveAvailableQuantities(ctx, storeID, variants)
+	if err != nil {
+		return nil, err
+	}
 	result := make(map[ids.VariantID]bool, len(variants))
+	for _, value := range variants {
+		result[value] = quantities[value] > 0
+	}
+	return result, nil
+}
+
+func (repository *Repository) ResolveAvailableQuantities(ctx context.Context, storeID ids.StoreID, variants []ids.VariantID) (map[ids.VariantID]int64, error) {
+	result := make(map[ids.VariantID]int64, len(variants))
 	if len(variants) == 0 {
 		return result, nil
 	}
@@ -166,14 +178,14 @@ func (repository *Repository) ResolveAvailability(ctx context.Context, storeID i
 		return nil, fmt.Errorf("resolve inventory availability: %w", err)
 	}
 	for _, value := range variants {
-		result[value] = false
+		result[value] = 0
 	}
 	for _, row := range rows {
 		id, err := ids.ParseVariantID(row.VariantID)
 		if err != nil {
 			return nil, err
 		}
-		result[id] = row.Available > 0
+		result[id] = row.Available
 	}
 	return result, nil
 }
