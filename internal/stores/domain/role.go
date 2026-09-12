@@ -18,6 +18,8 @@ const (
 	PermissionMembershipsManage Permission = "memberships.manage"
 	PermissionCatalogManage     Permission = "catalog.manage"
 	PermissionPricingManage     Permission = "pricing.manage"
+	PermissionInventoryView     Permission = "inventory.view"
+	PermissionInventoryManage   Permission = "inventory.manage"
 )
 
 func ParseRole(value string) (Role, error) {
@@ -31,9 +33,9 @@ func ParseRole(value string) (Role, error) {
 func (role Role) Allows(permission Permission) bool {
 	switch role {
 	case RoleOwner:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage
 	case RoleAdmin:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage
 	case RoleStaff:
 		return permission == PermissionStoreView
 	default:

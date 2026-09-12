@@ -113,8 +113,8 @@ Published-list queries use partial indexes such as `(store_id, published_at DESC
 | --- | --- | --- |
 | `pricing_price_lists` | Eligibility, priority, VND currency, validity | PK `(store_id,price_list_id)`; active-window lookup index |
 | `pricing_prices` | Variant amount in a price list | PK `(store_id,price_list_id,variant_id)`; variant resolution index |
-| `pricing_coupons` | Constrained fixed/percentage rule | PK `(store_id,coupon_id)`; unique `(store_id,canonical_code)` |
-| `pricing_coupon_redemptions` | Idempotent usage accounting | PK `(store_id,redemption_id)`; unique order/coupon application; customer usage index |
+| `pricing_coupons` | Post-MVP constrained fixed/percentage rule | PK `(store_id,coupon_id)`; unique `(store_id,canonical_code)` |
+| `pricing_coupon_redemptions` | Post-MVP idempotent usage accounting | PK `(store_id,redemption_id)`; unique order/coupon application; customer usage index |
 
 Amounts, minimums, and maximums are non-negative. Percentage uses an integer basis-point or similarly explicit scaled representation, never float.
 
@@ -159,7 +159,7 @@ One partial unique index may enforce one active cart per principal and currency 
 | `order_idempotency` | Checkout request/result binding | PK `(store_id,idempotency_key)`; request fingerprint and order FK |
 | `order_state_history` | Durable transition history | PK `(store_id,history_id)`; `(store_id,order_id,occurred_at)` |
 
-Order totals use separate subtotal, discount, shipping, VAT-inclusive display metadata, and grand-total columns with database checks for non-negative components and arithmetic consistency where expressible. Application domain rules remain authoritative for transition meaning.
+MVP order totals use separate subtotal, shipping, VAT-inclusive display metadata, and grand-total columns with database checks for non-negative components and arithmetic consistency where expressible. The post-MVP coupon slice adds discount totals and line snapshots through an expand-compatible migration. Application domain rules remain authoritative for transition meaning.
 
 ### Payments and refunds
 

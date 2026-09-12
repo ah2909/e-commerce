@@ -23,8 +23,8 @@ This file describes intended sequence, not completion. [Development status](deve
    - Draft, publish, archive, and list physical products, variants, categories, options, media references, SKU/barcode, weight, and dimensions.
    - Include keyset pagination and overlapping slug/SKU cross-store tests.
 
-5. **VND pricing and coupons**
-   - Store price lists, integer-money value object, deterministic price selection, VAT-inclusive presentation, fixed/percentage coupons, validity and usage accounting.
+5. **VND pricing**
+   - Store price lists, integer-money value object, deterministic price selection, and VAT-inclusive presentation.
 
 6. **Single-location inventory**
    - Stock items, immutable ledger, manual adjustment audit, atomic ten-minute reservations, confirmation, release, expiry worker, and real PostgreSQL concurrency tests.
@@ -54,6 +54,9 @@ This file describes intended sequence, not completion. [Development status](deve
     - Implement and verify customer-managed exact-host single-store routing and subdomain multi-store routing without caller-selected tenant scope.
     - Complete deployment configuration, secret/key rotation, dashboards, alerts, slow-query review, backup/PITR, restore exercise, dependency upgrades, security testing, capacity/load testing, runbooks, and explicit RPO/RTO/SLO approval.
 
+15. **Post-MVP coupons and redemption accounting**
+    - Add store-owned fixed/percentage coupons, deterministic eligibility, integer rounding, validity and usage limits, idempotent redemption accounting, and immutable order discount snapshots.
+
 ## Release milestones
 
 - **Internal admin foundation:** slices 1–3 pass independent architecture/security review and final verification.
@@ -61,6 +64,7 @@ This file describes intended sequence, not completion. [Development status](deve
 - **VietQR pilot:** slices 8–9 and the required event/operational subset support controlled manual-payment orders.
 - **MoMo pilot:** slice 10 passes provider fixtures, webhook security, concurrency, and reconciliation testing.
 - **MVP production:** slices 11–14 satisfy the documented product success criteria and an operator-approved launch checklist.
+- **Post-MVP promotions:** slice 15 adds coupons only after the MVP production gate passes.
 
 ## Scale checkpoints
 

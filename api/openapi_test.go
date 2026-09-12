@@ -33,6 +33,8 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/catalog/products/{product_id}", "/api/v1/admin/catalog/products/{product_id}/archive",
 		"/api/v1/admin/catalog/products/{product_id}/publish", "/api/v1/admin/pricing/price-lists",
 		"/api/v1/admin/pricing/price-lists/{price_list_id}", "/api/v1/admin/pricing/price-lists/{price_list_id}/archive",
+		"/api/v1/admin/inventory/stock-items", "/api/v1/admin/inventory/stock-items/{variant_id}",
+		"/api/v1/admin/inventory/stock-items/{variant_id}/adjustments",
 		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
 	}
 	for _, path := range wantPaths {
@@ -67,11 +69,14 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/admin/catalog/products/{product_id}/publish", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/pricing/price-lists", "post", true, []string{"201", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/pricing/price-lists/{price_list_id}", "put", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/inventory/stock-items", "get", false, []string{"200", "400", "401", "403", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/inventory/stock-items/{variant_id}/adjustments", "post", true, []string{"200", "400", "401", "403", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/catalog/products", "get", false, []string{"200", "400", "404", "503"})
 	assertOperationContract(t, document, "/api/v1/catalog/products/{slug}", "get", false, []string{"200", "404", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
 	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/pricing/price-lists", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/admin/inventory/stock-items/{variant_id}/adjustments", "post", "bearerAuth")
 	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)
@@ -100,6 +105,9 @@ func assertPublicCatalogSchema(t *testing.T, document map[string]any) {
 	variant := schemas["PublicCatalogVariant"].(map[string]any)["properties"].(map[string]any)
 	if _, exists := variant["barcode"]; exists {
 		t.Error("public variant exposes barcode")
+	}
+	if variant["in_stock"].(map[string]any)["type"] != "boolean" {
+		t.Fatal("public variant availability is not boolean")
 	}
 	price := schemas["PublicCatalogPrice"].(map[string]any)["properties"].(map[string]any)
 	if price["vat_inclusive"].(map[string]any)["const"] != true || price["currency"].(map[string]any)["const"] != "VND" {

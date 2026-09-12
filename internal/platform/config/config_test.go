@@ -34,6 +34,8 @@ func TestLoadFrom(t *testing.T) {
 	values["GOOGLE_CLIENT_SECRET"] = "google-secret"
 	values["GOOGLE_REDIRECT_URL"] = "https://auth.example.test/api/v1/auth/social/google/callback"
 	values["SOCIAL_RETURN_PATHS"] = "/auth/complete,/settings/security"
+	values["INVENTORY_EXPIRY_BATCH"] = "25"
+	values["INVENTORY_EXPIRY_POLL"] = "2s"
 
 	got, err := LoadFrom(mapLookup(values))
 	if err != nil {
@@ -69,6 +71,9 @@ func TestLoadFrom(t *testing.T) {
 	if !bytes.Equal(got.PlatformAdminToken[:], bytes.Repeat([]byte{0x42}, 32)) {
 		t.Fatal("LoadFrom() platform token mismatch")
 	}
+	if got.InventoryExpiryBatch != 25 || got.InventoryExpiryPoll != 2*time.Second {
+		t.Fatalf("LoadFrom() inventory worker fields = %#v", got)
+	}
 }
 
 func TestLoadFromDefaults(t *testing.T) {
@@ -90,6 +95,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	}
 	if got.AccessTokenTTL != defaultAccessTokenTTL || got.SessionTTL != defaultSessionTTL || got.SocialTransactionTTL != defaultSocialTransactionTTL || got.SocialExchangeTTL != defaultSocialExchangeTTL {
 		t.Fatalf("LoadFrom() identity TTL defaults = %#v", got)
+	}
+	if got.InventoryExpiryBatch != 50 || got.InventoryExpiryPoll != defaultInventoryExpiryPoll {
+		t.Fatalf("LoadFrom() inventory worker defaults = %#v", got)
 	}
 }
 
@@ -130,6 +138,8 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "wrong Google callback path", key: "GOOGLE_REDIRECT_URL", value: "https://auth.example.test/wrong", want: "exact AUTH_HOST callback"},
 		{name: "Google callback query", key: "GOOGLE_REDIRECT_URL", value: "https://auth.example.test/api/v1/auth/social/google/callback?next=x", want: "exact AUTH_HOST callback"},
 		{name: "external return URL", key: "SOCIAL_RETURN_PATHS", value: "https://evil.example/callback", want: "SOCIAL_RETURN_PATHS"},
+		{name: "large inventory batch", key: "INVENTORY_EXPIRY_BATCH", value: "101", want: "INVENTORY_EXPIRY_BATCH"},
+		{name: "large inventory poll", key: "INVENTORY_EXPIRY_POLL", value: "61s", want: "INVENTORY_EXPIRY_POLL"},
 	}
 
 	for _, test := range tests {

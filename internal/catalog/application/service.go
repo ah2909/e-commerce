@@ -51,6 +51,7 @@ type PublicVariant struct {
 	WeightGrams  int64             `json:"weight_grams"`
 	Dimensions   domain.Dimensions `json:"dimensions"`
 	Price        PublicPrice       `json:"price"`
+	InStock      bool              `json:"in_stock"`
 }
 
 type PublicMedia struct {
@@ -96,6 +97,10 @@ type PriceResolver interface {
 	ResolveCurrent(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]money.Money, error)
 }
 
+type AvailabilityResolver interface {
+	ResolveAvailability(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]bool, error)
+}
+
 type IDGenerator struct {
 	Product  func() (ids.ProductID, error)
 	Variant  func() (ids.VariantID, error)
@@ -104,11 +109,12 @@ type IDGenerator struct {
 }
 
 type Service struct {
-	repository Repository
-	ids        IDGenerator
-	now        func() time.Time
-	publisher  Publisher
-	prices     PriceResolver
+	repository   Repository
+	ids          IDGenerator
+	now          func() time.Time
+	publisher    Publisher
+	prices       PriceResolver
+	availability AvailabilityResolver
 }
 
 func NewService(repository Repository, generator IDGenerator, now func() time.Time) Service {
@@ -117,6 +123,11 @@ func NewService(repository Repository, generator IDGenerator, now func() time.Ti
 
 func (service Service) WithPublication(publisher Publisher, prices PriceResolver) Service {
 	service.publisher, service.prices = publisher, prices
+	return service
+}
+
+func (service Service) WithAvailability(resolver AvailabilityResolver) Service {
+	service.availability = resolver
 	return service
 }
 
@@ -259,7 +270,11 @@ func (service Service) GetPublicProduct(ctx context.Context, storeID ids.StoreID
 	if err != nil {
 		return PublicProduct{}, fmt.Errorf("resolve public prices: %w", err)
 	}
-	projected, ok := publicProduct(product, prices)
+	availability, err := service.resolveAvailability(ctx, storeID, []domain.Product{product})
+	if err != nil {
+		return PublicProduct{}, err
+	}
+	projected, ok := publicProduct(product, prices, availability)
 	if !ok {
 		return PublicProduct{}, ErrNotFound
 	}
@@ -297,9 +312,13 @@ func (service Service) ListPublicProducts(ctx context.Context, storeID ids.Store
 		if err != nil {
 			return PublicPage{}, fmt.Errorf("resolve public prices: %w", err)
 		}
+		availability, err := service.resolveAvailability(ctx, storeID, values)
+		if err != nil {
+			return PublicPage{}, err
+		}
 		for index, product := range values {
 			cursor = &PublishedCursor{PublishedAt: *product.PublishedAt, ProductID: product.ID}
-			if projected, ok := publicProduct(product, prices); ok {
+			if projected, ok := publicProduct(product, prices, availability); ok {
 				page.Products = append(page.Products, projected)
 			}
 			if len(page.Products) == limit {
@@ -332,7 +351,7 @@ func activeVariantIDs(products []domain.Product) []ids.VariantID {
 	return result
 }
 
-func publicProduct(product domain.Product, prices map[ids.VariantID]money.Money) (PublicProduct, bool) {
+func publicProduct(product domain.Product, prices map[ids.VariantID]money.Money, availability map[ids.VariantID]bool) (PublicProduct, bool) {
 	if product.Status != domain.ProductStatusPublished || product.PublishedAt == nil {
 		return PublicProduct{}, false
 	}
@@ -342,7 +361,8 @@ func publicProduct(product domain.Product, prices map[ids.VariantID]money.Money)
 		if variant.Status != domain.ItemActive || !ok {
 			continue
 		}
-		result.Variants = append(result.Variants, PublicVariant{VariantID: variant.ID, SKU: variant.SKU, OptionValues: variant.OptionValues, WeightGrams: variant.WeightGrams, Dimensions: variant.Dimensions, Price: PublicPrice{AmountMinor: price.AmountMinor, Currency: price.Currency, VATInclusive: true}})
+		projected := PublicVariant{VariantID: variant.ID, SKU: variant.SKU, OptionValues: variant.OptionValues, WeightGrams: variant.WeightGrams, Dimensions: variant.Dimensions, Price: PublicPrice{AmountMinor: price.AmountMinor, Currency: price.Currency, VATInclusive: true}, InStock: availability[variant.ID]}
+		result.Variants = append(result.Variants, projected)
 	}
 	for _, media := range product.Media {
 		if media.ArchivedAt == nil {
@@ -350,6 +370,17 @@ func publicProduct(product domain.Product, prices map[ids.VariantID]money.Money)
 		}
 	}
 	return result, len(result.Variants) > 0
+}
+
+func (service Service) resolveAvailability(ctx context.Context, storeID ids.StoreID, products []domain.Product) (map[ids.VariantID]bool, error) {
+	if service.availability == nil {
+		return nil, nil
+	}
+	values, err := service.availability.ResolveAvailability(ctx, storeID, activeVariantIDs(products))
+	if err != nil {
+		return nil, fmt.Errorf("resolve public availability: %w", err)
+	}
+	return values, nil
 }
 
 func encodePublishedCursor(cursor PublishedCursor) (string, error) {

@@ -50,7 +50,6 @@ This document defines intended behavior. [Development status](development-status
 - Physical products with categories, descriptions, multiple media references, and archive/publish status.
 - Variants with SKU, barcode, option values such as size and color, weight, dimensions, and independent availability.
 - Store-scoped price lists and VND prices represented as integer minor units.
-- Simple fixed-amount and percentage coupons with deterministic eligibility and usage limits.
 - VAT-inclusive storefront prices for the first Vietnam-focused release. VAT invoice issuance is deferred.
 
 ### Inventory
@@ -67,7 +66,7 @@ This document defines intended behavior. [Development status](development-status
 - Store-scoped customer profiles, Vietnamese delivery addresses, email, and phone number.
 - Mutable carts with estimated prices; checkout always recalculates authoritative prices and availability.
 - Flat-rate or free store-configured shipping for the MVP.
-- Order snapshots for product name, SKU, option values, price, discount, address, shipping charge, and applicable tax presentation.
+- Order snapshots for product name, SKU, option values, price, address, shipping charge, and applicable tax presentation.
 - A guest receives a high-entropy, store-bound order-access credential. Public order numbers are never sufficient for access.
 
 ### Orders and fulfillment
@@ -102,6 +101,7 @@ This document defines intended behavior. [Development status](development-status
 - Advanced promotion-rule language
 - Partial payments, partial refunds, and partial fulfillment
 - Automated shipping-provider integration
+- Coupons, promotional discounts, and redemption accounting
 - VAT invoice issuance and general multi-country tax calculation
 - Custom tenant domains and cross-store account linking
 - Self-service tenant creation and SaaS subscription billing

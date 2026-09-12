@@ -36,6 +36,8 @@ const (
 	maxSocialTransactionTTL        = 30 * time.Minute
 	maxSocialExchangeTTL           = 5 * time.Minute
 	maxRateWindow                  = 24 * time.Hour
+	defaultInventoryExpiryPoll     = 5 * time.Second
+	maxInventoryExpiryPoll         = time.Minute
 )
 
 type RateLimit struct {
@@ -83,6 +85,8 @@ type Config struct {
 	FacebookRedirectURL        string
 	FacebookGraphVersion       string
 	SocialReturnPaths          []string
+	InventoryExpiryBatch       int
+	InventoryExpiryPoll        time.Duration
 }
 
 type LookupFunc func(string) (string, bool)
@@ -215,6 +219,14 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	inventoryExpiryBatch, err := integer(lookup, "INVENTORY_EXPIRY_BATCH", 50, 1, 100)
+	if err != nil {
+		return Config{}, err
+	}
+	inventoryExpiryPoll, err := duration(lookup, "INVENTORY_EXPIRY_POLL", defaultInventoryExpiryPoll, maxInventoryExpiryPoll)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
@@ -250,6 +262,8 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		FacebookRedirectURL:        facebookRedirectURL,
 		FacebookGraphVersion:       optional(lookup, "FACEBOOK_GRAPH_VERSION", defaultFacebookGraphVersion),
 		SocialReturnPaths:          returnPaths,
+		InventoryExpiryBatch:       inventoryExpiryBatch,
+		InventoryExpiryPoll:        inventoryExpiryPoll,
 	}, nil
 }
 

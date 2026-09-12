@@ -28,6 +28,8 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [007 Gin and GORM migration](archive/007-adopt-gin-gorm-project-wide.md) | Native Gin transport and GORM persistence adapters with preserved schema, API, tenant, and concurrency behavior |
 | [008 Catalog authoring foundation](archive/008-catalog-authoring-foundation.md) | Tenant-safe draft Catalog authoring, migration 3, admin APIs, and concurrency/isolation evidence |
 | [009 VND pricing and Catalog publication](archive/009-vnd-pricing-catalog-publication.md) | Tenant-safe VND price lists, price-gated publication, public priced Catalog reads, and atomic outbox persistence |
+| [010 Defer coupons until after MVP](archive/010-defer-coupons-until-after-mvp.md) | MVP scope now proceeds from base pricing to Inventory; coupons and discount accounting follow production MVP |
+| [011 Single-location Inventory](archive/011-single-location-inventory.md) | Tenant-safe stock, immutable ledgers, audited adjustments, atomic reservations, public availability, and expiry processing |
 
 ## Starting work
 

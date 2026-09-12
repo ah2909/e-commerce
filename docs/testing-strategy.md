@@ -22,7 +22,7 @@ Prefer a small number of behavior-oriented tests over one test file per implemen
 
 - Tenant scope comes from authenticated context, every tenant query includes `store_id`, and cross-store access fails closed.
 - Authorization denies by default and distinguishes platform administration from store membership.
-- Money uses integer minor units and rejects invalid currency, overflow, tampered prices, and invalid discount boundaries.
+- Money uses integer minor units and rejects invalid currency, overflow, and tampered prices; discount-boundary cases apply when post-MVP discounts are introduced.
 - Inventory reservation, confirmation, release, and adjustment are atomic, auditable, idempotent, and safe under contention.
 - Checkout idempotency produces one order, order snapshots remain historical, and invalid state transitions fail.
 - Payment and webhook processing verifies signatures/raw input, rejects mismatches, and produces one business effect under duplicates or races.

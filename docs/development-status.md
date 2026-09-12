@@ -2,8 +2,8 @@
 
 ## Snapshot
 
-- Assessed: 2026-09-11
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, and 009
+- Assessed: 2026-09-12
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, and 011
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -14,6 +14,10 @@ Task 007 migrated production API routing and transport middleware to Gin and pro
 Task 008 completed tenant-scoped draft Catalog authoring. Both independent reviews and final verification passed on 2026-09-10.
 
 Task 009 completed VND storefront price lists, deterministic current-price resolution, price-gated Catalog publication with an atomic outbox fact, and public priced Catalog reads. Both independent reviews and final verification passed on 2026-09-11.
+
+Task 010 moved coupons, discount snapshots, and redemption accounting after the MVP production milestone. Inventory is now the next required slice; both independent documentation reviews and validation passed on 2026-09-11.
+
+Task 011 completed single-location stock, immutable quantity ledgers, idempotent audited adjustments, ten-minute reservations and terminal transitions, public in-stock projection, and the bounded expiry worker. Both independent reviews and final verification passed on 2026-09-12.
 
 ## Status meanings
 
@@ -34,8 +38,8 @@ Task 009 completed VND storefront price lists, deterministic current-price resol
 | Platform administration | Implemented, changes required | The protected base-domain route requires an explicitly supplied deployment platform token and atomically creates a sessionless owner account, membership, and audit record. Consolidated checks passed; the store-suspension/session race remains an explicitly accepted risk. |
 | Identity and workforce authorization | Implemented, changes required | Store-owned users, passwords, Google/Facebook adapters, opaque sessions, guests, memberships, roles, permission middleware, bound Redis state, trusted-proxy-aware rate limits, audit, host-scoped routes, migration 2, and OpenAPI exist. Consolidated verification passed; database-authoritative credential expiry and atomic suspension/session admission are explicitly accepted unresolved risks. |
 | Catalog | Implemented and accepted | Accepted [task 008](../tasks/archive/008-catalog-authoring-foundation.md) provides authoring. Accepted [task 009](../tasks/archive/009-vnd-pricing-catalog-publication.md) adds draft-to-published transition, price readiness, public priced list/detail reads, and transactional publication intent. |
-| Pricing and coupons | Partially implemented | Task 009 implements integer VND Money, storefront price-list aggregates, deterministic current-price selection, admin APIs, and tenant-scoped persistence. Coupons and redemption accounting remain unimplemented. |
-| Inventory | Not started | No stock item, reservation, ledger, expiry worker, or concurrency implementation exists. |
+| Pricing | Implemented and accepted | Task 009 implements integer VND Money, storefront price-list aggregates, deterministic current-price selection, admin APIs, and tenant-scoped persistence. Coupons and redemption accounting are intentionally deferred until after MVP. |
+| Inventory | Implemented and accepted | Accepted [task 011](../tasks/archive/011-single-location-inventory.md) adds migration 5, tenant-scoped stock/reservation/ledger persistence, admin adjustment APIs, public boolean availability, atomic reservation lifecycle operations, outbox/audit effects, expiry processing, and contention/isolation/rollback evidence. |
 | Customers and carts | Not started | Guest identity exists, but customer profiles, addresses, carts, and cart ownership do not. |
 | Checkout and orders | Not started | No checkout transaction, order snapshots, state machine, idempotency record, or guest order grant exists. |
 | VietQR payments | Not started | No store provider configuration, QR instruction, audited payment confirmation, or reconciliation implementation exists. |
@@ -71,7 +75,13 @@ Task 009 completed VND storefront price lists, deterministic current-price resol
 - validity, priority, lifecycle, optimistic-version, amount, and current-price query constraints/indexes
 - Eventing-owned tenant-scoped outbox facts with aggregate-version deduplication and a future publisher claim index
 
-The schema intentionally does not include platform operators. It also does not include coupons, Inventory, Customers, Carts, Orders, Payments, Refunds, Shipping, or inbox tables.
+### Migration 00005
+
+- tenant-owned variant stock, ten-minute order reservations, and immutable quantity ledger entries
+- non-negative physical/available quantity constraints, tenant Catalog foreign keys, optimistic versions, idempotent adjustment keys, and active-reservation indexes
+- audit action/subject support for attributed manual inventory adjustments
+
+The schema intentionally does not include platform operators. It also does not include post-MVP coupons, Customers, Carts, Orders, Payments, Refunds, Shipping, or inbox tables. Inventory reservation `order_id` values remain opaque references until the Orders module owns the corresponding aggregate and coordinated transaction.
 
 ## Current accepted risks and release blockers
 
@@ -99,7 +109,7 @@ These positives do not waive the blockers above.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`; it does not add a public Catalog route.
 
-Task 009 adds owner/admin price-list administration, authenticated Catalog publication, and unauthenticated host-scoped public Catalog list/detail endpoints. Public responses expose only published products and active variants with a current VAT-inclusive VND price. Coupons, inventory availability, customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints remain absent.
+Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value for each otherwise visible priced variant. Exact quantities, reservations, and ledgers are not public. Post-MVP coupons and MVP customer, cart, checkout, order, payment, refund, shipping, and event-administration endpoints remain absent.
 
 ## Verification evidence
 
@@ -133,8 +143,12 @@ Task 008 final verification on 2026-09-10: both independent reviews passed with 
 
 Task 009 final verification on 2026-09-11: both independent reviews passed after database-time, concurrency evidence, conflict mapping, and public-query amplification corrections. The complete rerun of `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 4, and vulnerability scanning. The scan reported zero vulnerabilities in called code or imported packages.
 
+Task 011 final verification on 2026-09-12: both independent reviews passed after materialization serialization, consistent exact reads, Catalog transaction-boundary cleanup, immutable-ledger hardening, duplicate-worker accounting, and expanded tenant/race/failure-injection coverage. The complete rerun of `make verify` passed formatting, zero-issue lint, all unit tests, all integration tests against Goose schema version 5, and vulnerability scanning with no vulnerabilities in called code.
+
 ## Required next work
 
-1. Add coupons and redemption accounting without weakening authoritative base-price selection.
+1. Add store-scoped Customers and guest/user carts.
+
+Eight roadmap slices remain after Inventory before MVP production if each slice is delivered as one task. Coupons and redemption accounting follow the MVP production gate.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

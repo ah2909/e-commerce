@@ -76,7 +76,7 @@ func TestSchemaCompatibilityRange(t *testing.T) {
 			t.Fatalf("version %d: %v", version, err)
 		}
 	}
-	for _, version := range []int64{2, 5} {
+	for _, version := range []int64{MinimumCompatibleSchemaVersion - 1, CurrentSchemaVersion + 1} {
 		if err := validateSchemaVersion(version, MinimumCompatibleSchemaVersion, CurrentSchemaVersion); err == nil {
 			t.Fatalf("version %d was accepted", version)
 		}

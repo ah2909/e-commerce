@@ -87,8 +87,22 @@ func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 	defer cancel()
 	for _, fixture := range created {
 		storeID := fixture.Store.ID().String()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			tb.Errorf("begin fixture cleanup: %v", err)
+			continue
+		}
+		if _, err := tx.Exec(ctx, `SET LOCAL application_name = 'ecommerce-test-cleanup'`); err != nil {
+			_ = tx.Rollback(ctx)
+			tb.Errorf("identify fixture cleanup: %v", err)
+			continue
+		}
+		failed := false
 		for _, statement := range []string{
 			`DELETE FROM outbox_events WHERE store_id = $1::uuid`,
+			`DELETE FROM inventory_ledger_entries WHERE store_id = $1::uuid`,
+			`DELETE FROM inventory_reservations WHERE store_id = $1::uuid`,
+			`DELETE FROM inventory_stock_items WHERE store_id = $1::uuid`,
 			`DELETE FROM pricing_prices WHERE store_id = $1::uuid`,
 			`DELETE FROM pricing_price_lists WHERE store_id = $1::uuid`,
 			`DELETE FROM catalog_media WHERE store_id = $1::uuid`,
@@ -101,9 +115,18 @@ func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 			`DELETE FROM users WHERE store_id = $1::uuid`,
 			`DELETE FROM stores WHERE store_id = $1::uuid`,
 		} {
-			if _, err := pool.Exec(ctx, statement, storeID); err != nil {
+			if _, err := tx.Exec(ctx, statement, storeID); err != nil {
 				tb.Errorf("clean fixture store: %v", err)
+				failed = true
+				break
 			}
+		}
+		if failed {
+			_ = tx.Rollback(ctx)
+			continue
+		}
+		if err := tx.Commit(ctx); err != nil {
+			tb.Errorf("commit fixture cleanup: %v", err)
 		}
 	}
 }

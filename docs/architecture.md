@@ -77,7 +77,7 @@ Custom domains and automatic cross-deployment data movement require later ADRs.
 | Identity | users, credentials, social links, sessions, guest principals | authenticate store-bound principal |
 | Stores | stores, subdomains, memberships, roles, regional settings | resolve store, authorize membership, read regional settings |
 | Catalog | products, variants, categories, options, media references | read sellable variant snapshot |
-| Pricing | price lists, prices, coupons, discount evaluation | resolve authoritative checkout price |
+| Pricing | price lists, prices, post-MVP coupons and discount evaluation | resolve authoritative checkout price |
 | Inventory | stock items, reservations, stock ledger | reserve, confirm, release stock |
 | Customers | profiles and addresses | read customer-owned checkout data |
 | Carts | mutable shopping intent | read/close cart |

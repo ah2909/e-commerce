@@ -23,6 +23,9 @@ import (
 	identitysocial "github.com/ah2909/e-commerce/internal/identity/infrastructure/social"
 	"github.com/ah2909/e-commerce/internal/identity/infrastructure/token"
 	identityhttp "github.com/ah2909/e-commerce/internal/identity/transport/http"
+	inventoryapplication "github.com/ah2909/e-commerce/internal/inventory/application"
+	inventorypostgres "github.com/ah2909/e-commerce/internal/inventory/infrastructure/postgres"
+	inventoryhttp "github.com/ah2909/e-commerce/internal/inventory/transport/http"
 	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
 	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
 	onboardinghttp "github.com/ah2909/e-commerce/internal/onboarding/transport/http"
@@ -146,12 +149,19 @@ func run() error {
 		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
 		if pricingAvailable(schemaVersion) {
-			pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogRepository)
+			pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker())
 			pricingService := pricingapplication.NewService(pricingRepository, ids.NewPriceListID, time.Now)
 			publication := catalogpostgres.NewPublicationCoordinator(connection.GORM, pricingRepository, eventingpostgres.NewWriter(), ids.NewEventID)
 			catalogService = catalogService.WithPublication(publication, pricingRepository)
 			pricingHandler := pricinghttp.NewHandler(pricingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 			pricingHandler.Register(engine, hostMiddleware)
+		}
+		if inventoryAvailable(schemaVersion) {
+			inventoryRepository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
+			inventoryService := inventoryapplication.NewService(inventoryRepository)
+			catalogService = catalogService.WithAvailability(inventoryService)
+			inventoryHandler := inventoryhttp.NewHandler(inventoryService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
+			inventoryHandler.Register(engine, hostMiddleware)
 		}
 		catalogHandler := cataloghttp.NewHandler(catalogService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 		catalogHandler.Register(engine, hostMiddleware)
@@ -184,8 +194,9 @@ func run() error {
 	return nil
 }
 
-func catalogAvailable(schemaVersion int64) bool { return schemaVersion >= 3 }
-func pricingAvailable(schemaVersion int64) bool { return schemaVersion >= 4 }
+func catalogAvailable(schemaVersion int64) bool   { return schemaVersion >= 3 }
+func pricingAvailable(schemaVersion int64) bool   { return schemaVersion >= 4 }
+func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

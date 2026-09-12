@@ -87,6 +87,12 @@ func (stub priceResolverStub) ResolveCurrent(context.Context, ids.StoreID, []ids
 	return stub.values, nil
 }
 
+type availabilityResolverStub struct{ values map[ids.VariantID]bool }
+
+func (stub availabilityResolverStub) ResolveAvailability(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]bool, error) {
+	return stub.values, nil
+}
+
 type publisherStub struct{ called bool }
 
 func (stub *publisherStub) Publish(context.Context, ids.StoreID, ids.ProductID, int64, string) (domain.Product, error) {
@@ -111,6 +117,20 @@ func TestPublicProjectionHidesUnpricedVariantsAndAuthoringFields(t *testing.T) {
 	}
 	if len(page.Products) != 1 || len(page.Products[0].Variants) != 1 || page.Products[0].Variants[0].VariantID != pricedID || !page.Products[0].Variants[0].Price.VATInclusive {
 		t.Fatalf("page = %#v", page)
+	}
+}
+
+func TestPublicProjectionAddsOnlyBooleanAvailability(t *testing.T) {
+	store, _ := ids.ParseStoreID("11111111-1111-4111-8111-111111111111")
+	productID, _ := ids.ParseProductID("22222222-2222-4222-8222-222222222222")
+	variantID, _ := ids.ParseVariantID("33333333-3333-4333-8333-333333333333")
+	now := time.Now().UTC()
+	product := domain.Product{StoreID: store, ID: productID, Name: "Product", Slug: "product", Status: domain.ProductStatusPublished, PublishedAt: &now, Variants: []domain.Variant{{ID: variantID, Status: domain.ItemActive}}}
+	price, _ := money.New(100, "VND")
+	service := NewService(&repositoryStub{published: []domain.Product{product}}, IDGenerator{}, time.Now).WithPublication(nil, priceResolverStub{values: map[ids.VariantID]money.Money{variantID: price}}).WithAvailability(availabilityResolverStub{values: map[ids.VariantID]bool{variantID: true}})
+	result, err := service.GetPublicProduct(context.Background(), store, "product")
+	if err != nil || len(result.Variants) != 1 || !result.Variants[0].InStock {
+		t.Fatalf("result = %#v, error = %v", result, err)
 	}
 }
 

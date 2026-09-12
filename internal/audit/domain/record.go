@@ -42,7 +42,8 @@ func NewRecord(storeID ids.StoreID, actorType ActorType, actorID, action, subjec
 	if storeID == "" || (actorType != ActorPlatformAdmin && actorType != ActorUser) || actorID == "" || subjectID == "" || requestID == "" || occurredAt.IsZero() {
 		return Record{}, ErrInvalidRecord
 	}
-	if (action != "store.created" && action != "membership.created" && action != "membership.updated") || (subjectType != "store" && subjectType != "membership") {
+	validSubject := (action == "store.created" && subjectType == "store") || ((action == "membership.created" || action == "membership.updated") && subjectType == "membership") || (action == "inventory.adjusted" && subjectType == "inventory_stock_item")
+	if !validSubject {
 		return Record{}, ErrInvalidRecord
 	}
 	return Record{StoreID: storeID, AuditID: auditID, ActorType: actorType, ActorID: actorID, Action: action, SubjectType: subjectType, SubjectID: subjectID, RequestID: requestID, OccurredAt: occurredAt.UTC()}, nil

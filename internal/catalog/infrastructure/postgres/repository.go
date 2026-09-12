@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/ah2909/e-commerce/internal/catalog/application"
@@ -313,22 +312,6 @@ func (repository *Repository) ListPublished(ctx context.Context, storeID ids.Sto
 		return err
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return products, err
-}
-
-func (repository *Repository) LockActiveVariants(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, variantIDs []ids.VariantID) (bool, error) {
-	values := make([]string, len(variantIDs))
-	for index, id := range variantIDs {
-		values[index] = id.String()
-	}
-	sort.Strings(values)
-	var rows []variantRow
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).Where("store_id = ? AND variant_id IN ? AND status = 'active'", storeID.String(), values).Order("variant_id").Find(&rows).Error; err != nil {
-		return false, fmt.Errorf("lock active catalog variants: %w", err)
-	}
-	if len(rows) != len(values) {
-		return false, nil
-	}
-	return true, nil
 }
 
 func (repository *Repository) CreateCategory(ctx context.Context, storeID ids.StoreID, category domain.Category) (domain.Category, error) {

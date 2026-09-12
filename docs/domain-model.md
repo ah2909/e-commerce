@@ -90,15 +90,14 @@ A price list defines store, VND currency, optional channel/customer scope, valid
 
 ### Coupon
 
-The MVP coupon is either a fixed VND amount or percentage with explicit validity, minimum subtotal, total usage limit, optional per-customer limit, and maximum discount where applicable.
+Coupons are a post-MVP Pricing extension. A future coupon may be either a fixed VND amount or percentage with explicit validity, minimum subtotal, total usage limit, optional per-customer limit, and maximum discount where applicable.
 
 Rules:
 
 - Price selection is deterministic by eligibility, priority, and stable tie-breaker.
 - Overlapping price lists that would remain ambiguous are rejected.
-- Checkout recalculates authoritative item prices and discounts; client totals are hints only.
-- Rounding occurs once at a documented component boundary using integer arithmetic.
-- Discounts cannot make a line or order component negative.
+- MVP checkout recalculates authoritative item prices; client totals are hints only.
+- Future discount evaluation rounds once at a documented component boundary using integer arithmetic and cannot make a line or order component negative.
 - Storefront prices are VAT-inclusive for the first Vietnam-focused release; VAT invoice issuance is outside the MVP.
 
 ## Inventory
@@ -153,7 +152,7 @@ Rules:
 
 ### Order and line snapshots
 
-An order contains store, public store-scoped order number, customer/guest relationship, currency, financial totals, contact and address snapshots, shipping snapshot, state, version, and timestamps. Each line persists variant reference plus name, SKU, selected options, quantity, unit price, discount, tax presentation, and total.
+An order contains store, public store-scoped order number, customer/guest relationship, currency, financial totals, contact and address snapshots, shipping snapshot, state, version, and timestamps. Each MVP line persists variant reference plus name, SKU, selected options, quantity, unit price, tax presentation, and total. Discount snapshots are added with the post-MVP coupon capability.
 
 ### Guest order grant
 

@@ -19,6 +19,9 @@ type CategoryID string
 type MediaID string
 type PriceListID string
 type EventID string
+type ReservationID string
+type LedgerEntryID string
+type OrderID string
 
 func ParseStoreID(value string) (StoreID, error) {
 	value, err := parseUUID(value)
@@ -58,6 +61,13 @@ func ParsePriceListID(value string) (PriceListID, error) {
 	return parseTypedID[PriceListID](value, "price list")
 }
 func ParseEventID(value string) (EventID, error) { return parseTypedID[EventID](value, "event") }
+func ParseReservationID(value string) (ReservationID, error) {
+	return parseTypedID[ReservationID](value, "reservation")
+}
+func ParseLedgerEntryID(value string) (LedgerEntryID, error) {
+	return parseTypedID[LedgerEntryID](value, "ledger entry")
+}
+func ParseOrderID(value string) (OrderID, error) { return parseTypedID[OrderID](value, "order") }
 
 func NewStoreID() (StoreID, error)         { value, err := newUUID(); return StoreID(value), err }
 func NewUserID() (UserID, error)           { value, err := newUUID(); return UserID(value), err }
@@ -68,16 +78,28 @@ func NewCategoryID() (CategoryID, error)   { value, err := newUUID(); return Cat
 func NewMediaID() (MediaID, error)         { value, err := newUUID(); return MediaID(value), err }
 func NewPriceListID() (PriceListID, error) { value, err := newUUID(); return PriceListID(value), err }
 func NewEventID() (EventID, error)         { value, err := newUUID(); return EventID(value), err }
+func NewReservationID() (ReservationID, error) {
+	value, err := newUUID()
+	return ReservationID(value), err
+}
+func NewLedgerEntryID() (LedgerEntryID, error) {
+	value, err := newUUID()
+	return LedgerEntryID(value), err
+}
+func NewOrderID() (OrderID, error) { value, err := newUUID(); return OrderID(value), err }
 
-func (id StoreID) String() string     { return string(id) }
-func (id UserID) String() string      { return string(id) }
-func (id GuestID) String() string     { return string(id) }
-func (id ProductID) String() string   { return string(id) }
-func (id VariantID) String() string   { return string(id) }
-func (id CategoryID) String() string  { return string(id) }
-func (id MediaID) String() string     { return string(id) }
-func (id PriceListID) String() string { return string(id) }
-func (id EventID) String() string     { return string(id) }
+func (id StoreID) String() string       { return string(id) }
+func (id UserID) String() string        { return string(id) }
+func (id GuestID) String() string       { return string(id) }
+func (id ProductID) String() string     { return string(id) }
+func (id VariantID) String() string     { return string(id) }
+func (id CategoryID) String() string    { return string(id) }
+func (id MediaID) String() string       { return string(id) }
+func (id PriceListID) String() string   { return string(id) }
+func (id EventID) String() string       { return string(id) }
+func (id ReservationID) String() string { return string(id) }
+func (id LedgerEntryID) String() string { return string(id) }
+func (id OrderID) String() string       { return string(id) }
 
 func parseTypedID[T ~string](value, name string) (T, error) {
 	parsed, err := parseUUID(value)

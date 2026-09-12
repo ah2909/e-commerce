@@ -67,7 +67,7 @@ func TestPricingMigrationUpgradesPopulatedVersionThreeAndRepeats(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO catalog_variants (store_id,variant_id,product_id,sku,option_values,weight_grams,status,version,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3::uuid,'EXISTING','{}',0,'active',1,now(),now())`, id.String(), variantID.String(), productID.String()); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpContext(ctx, db, migrations); err != nil {
+	if err := goose.UpToContext(ctx, db, migrations, 4); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationVersion(t, ctx, db, 4)
@@ -77,7 +77,7 @@ func TestPricingMigrationUpgradesPopulatedVersionThreeAndRepeats(t *testing.T) {
 	}
 	assertCatalogSchemaShape(t, ctx, db)
 	assertPricingPublicationSchemaShape(t, ctx, db)
-	if err := goose.UpContext(ctx, db, migrations); err != nil {
+	if err := goose.UpToContext(ctx, db, migrations, 4); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationVersion(t, ctx, db, 4)
