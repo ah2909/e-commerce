@@ -2,8 +2,8 @@
 
 ## Snapshot
 
-- Assessed: 2026-09-12
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, and 012
+- Assessed: 2026-09-13
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, and 013
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -20,6 +20,8 @@ Task 010 moved coupons, discount snapshots, and redemption accounting after the 
 Task 011 completed single-location stock, immutable quantity ledgers, idempotent audited adjustments, ten-minute reservations and terminal transitions, public in-stock projection, and the bounded expiry worker. Both independent reviews and final verification passed on 2026-09-12.
 
 Accepted [task 012](../tasks/archive/012-customers-and-carts.md) implements store/user-scoped customer profiles and Vietnamese saved addresses plus user/guest-owned VND carts, current batched estimates, optimistic mutation, and database-time expiry. Independent architecture/security reviews and final verification passed.
+
+Accepted [task 013](../tasks/archive/013-checkout-orders.md) implements atomic user/guest checkout, authoritative VND price and stock validation, immutable order snapshots, store-scoped idempotency, guest order grants, flat/free shipping rules, minimal pending payments, transactional outbox facts, and coordinated order expiry. Both independent reviews and final verification passed.
 
 ## Status meanings
 
@@ -43,11 +45,11 @@ Accepted [task 012](../tasks/archive/012-customers-and-carts.md) implements stor
 | Pricing | Implemented and accepted | Task 009 implements integer VND Money, storefront price-list aggregates, deterministic current-price selection, admin APIs, and tenant-scoped persistence. Coupons and redemption accounting are intentionally deferred until after MVP. |
 | Inventory | Implemented and accepted | Accepted [task 011](../tasks/archive/011-single-location-inventory.md) adds migration 5, tenant-scoped stock/reservation/ledger persistence, admin adjustment APIs, public boolean availability, atomic reservation lifecycle operations, outbox/audit effects, expiry processing, and contention/isolation/rollback evidence. |
 | Customers and carts | Implemented and accepted | Accepted [task 012](../tasks/archive/012-customers-and-carts.md) adds migration 6, user-owned profiles and saved addresses, user/guest carts, current Catalog/Pricing/Inventory projections, schema-gated APIs, and bounded expiry. |
-| Checkout and orders | Not started | No checkout transaction, order snapshots, state machine, idempotency record, or guest order grant exists. |
+| Checkout and orders | Implemented and accepted | Accepted task 013 adds migration 7, the atomic checkout coordinator, immutable snapshots, central lifecycle policy, tenant idempotency, guest grants, order reads, and order-first expiry. |
 | VietQR payments | Not started | No store provider configuration, QR instruction, audited payment confirmation, or reconciliation implementation exists. |
 | MoMo payments | Not started | No provider adapter, signed webhook, attempt, receipt, or automatic confirmation implementation exists. |
 | Cancellation and refunds | Not started | No order cancellation or full-refund workflow exists. |
-| Shipping and fulfillment | Not started | No flat/free shipping rule, shipment, carrier, or tracking implementation exists. |
+| Shipping and fulfillment | Partially implemented | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Shipment, carrier, tracking, and fulfillment transitions remain unimplemented. |
 | Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
 | Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
 
@@ -89,7 +91,13 @@ Accepted [task 012](../tasks/archive/012-customers-and-carts.md) implements stor
 - user-or-guest VND carts with exactly-one-owner checks, one-active-cart uniqueness, optimistic versions, 30-day expiry, and terminal retention
 - positive tenant Catalog cart lines with composite cart and variant foreign keys
 
-The schema intentionally does not include platform operators. It also does not include post-MVP coupons, Orders, Payments, Refunds, Shipping, or inbox tables. Inventory reservation `order_id` values remain opaque references until the Orders module owns the corresponding aggregate and coordinated transaction.
+### Migration 00007
+
+- tenant-owned orders, immutable line/delivery/shipping/contact snapshots, per-store order numbers, checkout idempotency, state history, and digested guest grants
+- one current versioned free/flat VND shipping rule, minimal provider-selected pending payments, cart conversion links, and pending-order expiry indexes
+- Inventory reservation order references remain opaque for standalone compatibility; the Orders coordinator establishes their relationship in the checkout transaction
+
+The schema intentionally does not include platform operators. It also does not include post-MVP coupons, provider configurations/attempts/webhooks, Refunds, shipments, or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -113,11 +121,11 @@ These positives do not waive the blockers above.
 
 ## Public API status
 
-[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
+[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, Shipping-rule, Checkout, Order, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`.
 
-Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Exact inventory quantities, reservations, ledgers, normalized contacts, and foreign customer/cart data are not public. Post-MVP coupons and MVP checkout, order, payment, refund, shipping, and event-administration endpoints remain absent.
+Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Exact inventory quantities, reservations, ledgers, normalized contacts, and foreign customer/cart/order data are not public. Post-MVP coupons and provider execution, refunds, fulfillment, and event-administration endpoints remain absent.
 
 ## Verification evidence
 
@@ -155,10 +163,12 @@ Task 011 final verification on 2026-09-12: both independent reviews passed after
 
 Task 012 final verification on 2026-09-12: both independent reviews passed after snapshot-consistent cart responses, strict contact validation, and expanded persistence, migration, concurrency, isolation, authentication, and HTTP evidence. The complete `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 6, and vulnerability scanning with no vulnerabilities in called or imported code.
 
+Task 013 final verification on 2026-09-13: both independent reviews passed after consistent order/payment reads, all-or-nothing coordinated expiry, owner-complete events, retryable Shipping error mapping, migration-operability documentation, and expanded rollback, contention, grant, tenant, and schema evidence. The complete `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 7, and vulnerability scanning with no vulnerabilities in called code.
+
 ## Required next work
 
-1. Implement Checkout and orders.
+1. Implement VietQR and MoMo provider execution and signed confirmation workflows.
 
-Seven roadmap slices remain after Customers and carts before MVP production if each slice is delivered as one task. Coupons and redemption accounting follow the MVP production gate.
+Six roadmap slices remain after Checkout and orders before MVP production if each slice is delivered as one task. Coupons and redemption accounting follow the MVP production gate.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

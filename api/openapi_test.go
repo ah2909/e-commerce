@@ -37,6 +37,7 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/inventory/stock-items/{variant_id}/adjustments",
 		"/api/v1/customer/profile", "/api/v1/customer/addresses", "/api/v1/customer/addresses/{address_id}",
 		"/api/v1/cart", "/api/v1/cart/lines/{variant_id}",
+		"/api/v1/admin/shipping/rule", "/api/v1/checkout", "/api/v1/orders/{order_id}",
 		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
 	}
 	for _, path := range wantPaths {
@@ -80,12 +81,16 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/customer/addresses/{address_id}", "put", true, []string{"200", "400", "401", "404", "409", "503"})
 	assertOperationContract(t, document, "/api/v1/cart", "post", false, []string{"200", "201", "401", "503"})
 	assertOperationContract(t, document, "/api/v1/cart/lines/{variant_id}", "put", true, []string{"200", "400", "401", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/shipping/rule", "put", true, []string{"200", "400", "401", "403", "404", "409", "503"})
+	assertOperationContract(t, document, "/api/v1/checkout", "post", true, []string{"200", "201", "400", "401", "404", "409", "422", "503"})
+	assertOperationContract(t, document, "/api/v1/orders/{order_id}", "get", false, []string{"200", "401", "404", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
 	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/pricing/price-lists", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/inventory/stock-items/{variant_id}/adjustments", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/customer/profile", "put", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/cart", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/checkout", "post", "bearerAuth")
 	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)

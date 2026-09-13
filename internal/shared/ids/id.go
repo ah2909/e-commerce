@@ -25,6 +25,10 @@ type OrderID string
 type CustomerID string
 type AddressID string
 type CartID string
+type OrderLineID string
+type OrderHistoryID string
+type PaymentID string
+type ShippingRuleID string
 
 func ParseStoreID(value string) (StoreID, error) {
 	value, err := parseUUID(value)
@@ -78,6 +82,12 @@ func ParseAddressID(value string) (AddressID, error) {
 	return parseTypedID[AddressID](value, "address")
 }
 func ParseCartID(value string) (CartID, error) { return parseTypedID[CartID](value, "cart") }
+func ParsePaymentID(value string) (PaymentID, error) {
+	return parseTypedID[PaymentID](value, "payment")
+}
+func ParseShippingRuleID(value string) (ShippingRuleID, error) {
+	return parseTypedID[ShippingRuleID](value, "shipping rule")
+}
 
 func NewStoreID() (StoreID, error)         { value, err := newUUID(); return StoreID(value), err }
 func NewUserID() (UserID, error)           { value, err := newUUID(); return UserID(value), err }
@@ -96,26 +106,40 @@ func NewLedgerEntryID() (LedgerEntryID, error) {
 	value, err := newUUID()
 	return LedgerEntryID(value), err
 }
-func NewOrderID() (OrderID, error)       { value, err := newUUID(); return OrderID(value), err }
-func NewCustomerID() (CustomerID, error) { value, err := newUUID(); return CustomerID(value), err }
-func NewAddressID() (AddressID, error)   { value, err := newUUID(); return AddressID(value), err }
-func NewCartID() (CartID, error)         { value, err := newUUID(); return CartID(value), err }
+func NewOrderID() (OrderID, error)         { value, err := newUUID(); return OrderID(value), err }
+func NewCustomerID() (CustomerID, error)   { value, err := newUUID(); return CustomerID(value), err }
+func NewAddressID() (AddressID, error)     { value, err := newUUID(); return AddressID(value), err }
+func NewCartID() (CartID, error)           { value, err := newUUID(); return CartID(value), err }
+func NewOrderLineID() (OrderLineID, error) { value, err := newUUID(); return OrderLineID(value), err }
+func NewOrderHistoryID() (OrderHistoryID, error) {
+	value, err := newUUID()
+	return OrderHistoryID(value), err
+}
+func NewPaymentID() (PaymentID, error) { value, err := newUUID(); return PaymentID(value), err }
+func NewShippingRuleID() (ShippingRuleID, error) {
+	value, err := newUUID()
+	return ShippingRuleID(value), err
+}
 
-func (id StoreID) String() string       { return string(id) }
-func (id UserID) String() string        { return string(id) }
-func (id GuestID) String() string       { return string(id) }
-func (id ProductID) String() string     { return string(id) }
-func (id VariantID) String() string     { return string(id) }
-func (id CategoryID) String() string    { return string(id) }
-func (id MediaID) String() string       { return string(id) }
-func (id PriceListID) String() string   { return string(id) }
-func (id EventID) String() string       { return string(id) }
-func (id ReservationID) String() string { return string(id) }
-func (id LedgerEntryID) String() string { return string(id) }
-func (id OrderID) String() string       { return string(id) }
-func (id CustomerID) String() string    { return string(id) }
-func (id AddressID) String() string     { return string(id) }
-func (id CartID) String() string        { return string(id) }
+func (id StoreID) String() string        { return string(id) }
+func (id UserID) String() string         { return string(id) }
+func (id GuestID) String() string        { return string(id) }
+func (id ProductID) String() string      { return string(id) }
+func (id VariantID) String() string      { return string(id) }
+func (id CategoryID) String() string     { return string(id) }
+func (id MediaID) String() string        { return string(id) }
+func (id PriceListID) String() string    { return string(id) }
+func (id EventID) String() string        { return string(id) }
+func (id ReservationID) String() string  { return string(id) }
+func (id LedgerEntryID) String() string  { return string(id) }
+func (id OrderID) String() string        { return string(id) }
+func (id CustomerID) String() string     { return string(id) }
+func (id AddressID) String() string      { return string(id) }
+func (id CartID) String() string         { return string(id) }
+func (id OrderLineID) String() string    { return string(id) }
+func (id OrderHistoryID) String() string { return string(id) }
+func (id PaymentID) String() string      { return string(id) }
+func (id ShippingRuleID) String() string { return string(id) }
 
 func parseTypedID[T ~string](value, name string) (T, error) {
 	parsed, err := parseUUID(value)

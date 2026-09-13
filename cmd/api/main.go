@@ -35,6 +35,10 @@ import (
 	onboardingapplication "github.com/ah2909/e-commerce/internal/onboarding/application"
 	onboardingpostgres "github.com/ah2909/e-commerce/internal/onboarding/infrastructure/postgres"
 	onboardinghttp "github.com/ah2909/e-commerce/internal/onboarding/transport/http"
+	ordersapplication "github.com/ah2909/e-commerce/internal/orders/application"
+	orderspostgres "github.com/ah2909/e-commerce/internal/orders/infrastructure/postgres"
+	ordershttp "github.com/ah2909/e-commerce/internal/orders/transport/http"
+	paymentspostgres "github.com/ah2909/e-commerce/internal/payments/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/platform/adminauth"
 	"github.com/ah2909/e-commerce/internal/platform/clientaddr"
 	"github.com/ah2909/e-commerce/internal/platform/config"
@@ -49,6 +53,9 @@ import (
 	pricingpostgres "github.com/ah2909/e-commerce/internal/pricing/infrastructure/postgres"
 	pricinghttp "github.com/ah2909/e-commerce/internal/pricing/transport/http"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
+	shippingapplication "github.com/ah2909/e-commerce/internal/shipping/application"
+	shippingpostgres "github.com/ah2909/e-commerce/internal/shipping/infrastructure/postgres"
+	shippinghttp "github.com/ah2909/e-commerce/internal/shipping/transport/http"
 	storesapplication "github.com/ah2909/e-commerce/internal/stores/application"
 	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	storeshttp "github.com/ah2909/e-commerce/internal/stores/transport/http"
@@ -156,8 +163,10 @@ func run() error {
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
 		var pricingService pricingapplication.Service
 		var inventoryService inventoryapplication.Service
+		var pricingRepository *pricingpostgres.Repository
+		var inventoryRepository *inventorypostgres.Repository
 		if pricingAvailable(schemaVersion) {
-			pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker())
+			pricingRepository = pricingpostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker())
 			pricingService = pricingapplication.NewService(pricingRepository, ids.NewPriceListID, time.Now)
 			publication := catalogpostgres.NewPublicationCoordinator(connection.GORM, pricingRepository, eventingpostgres.NewWriter(), ids.NewEventID)
 			catalogService = catalogService.WithPublication(publication, pricingRepository)
@@ -165,7 +174,7 @@ func run() error {
 			pricingHandler.Register(engine, hostMiddleware)
 		}
 		if inventoryAvailable(schemaVersion) {
-			inventoryRepository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
+			inventoryRepository = inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
 			inventoryService = inventoryapplication.NewService(inventoryRepository)
 			catalogService = catalogService.WithAvailability(inventoryService)
 			inventoryHandler := inventoryhttp.NewHandler(inventoryService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
@@ -177,10 +186,20 @@ func run() error {
 			catalogHandler.RegisterPublication(engine, hostMiddleware)
 		}
 		if customersAvailable(schemaVersion) {
-			customerService := customersapplication.NewService(customerspostgres.NewRepository(connection.GORM))
+			customerRepository := customerspostgres.NewRepository(connection.GORM)
+			customerService := customersapplication.NewService(customerRepository)
 			customershttp.NewHandler(customerService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
-			cartService := cartsapplication.NewService(cartspostgres.NewRepository(connection.GORM), catalogService, pricingService, inventoryService)
+			cartRepository := cartspostgres.NewRepository(connection.GORM)
+			cartService := cartsapplication.NewService(cartRepository, catalogService, pricingService, inventoryService)
 			cartshttp.NewHandler(cartService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+			if ordersAvailable(schemaVersion) {
+				shippingRepository := shippingpostgres.NewRepository(connection.GORM)
+				shippingService := shippingapplication.NewService(shippingRepository)
+				shippinghttp.NewHandler(shippingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+				orderRepository := orderspostgres.NewRepository(connection.GORM, cartRepository, catalogRepository, pricingRepository, customerRepository, shippingRepository, inventoryRepository, paymentspostgres.NewParticipant(), eventingpostgres.NewWriter())
+				orderService := ordersapplication.NewService(orderRepository)
+				ordershttp.NewHandler(orderService, identityService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+			}
 		}
 	} else {
 		logger.Info("Catalog routes await schema migration", "schema_version", schemaVersion)
@@ -212,6 +231,7 @@ func catalogAvailable(schemaVersion int64) bool   { return schemaVersion >= 3 }
 func pricingAvailable(schemaVersion int64) bool   { return schemaVersion >= 4 }
 func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
 func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
+func ordersAvailable(schemaVersion int64) bool    { return schemaVersion >= 7 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

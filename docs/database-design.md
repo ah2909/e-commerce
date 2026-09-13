@@ -148,6 +148,10 @@ Contact indexes are added only for supported store workflows. They do not grant 
 
 One partial unique index may enforce one active cart per principal and currency if that becomes the API contract. Cart rows are not used as historical order data.
 
+Successful checkout stores a deferred tenant-composite `converted_order_id` link while changing the cart to `converted`. The matching order-to-cart link is also deferred so fixture cleanup and future archival can preserve both records without weakening the atomic checkout invariant.
+
+Migration 7 adds the nullable cart conversion column under an `ACCESS EXCLUSIVE` metadata lock and validates its tenant-composite foreign key against existing carts. The conversion check is `NOT VALID` to avoid a historical-table scan while still enforcing new writes.
+
 ### Orders
 
 | Table | Purpose | Important constraints/indexes |
@@ -160,6 +164,8 @@ One partial unique index may enforce one active cart per principal and currency 
 | `order_state_history` | Durable transition history | PK `(store_id,history_id)`; `(store_id,order_id,occurred_at)` |
 
 MVP order totals use separate subtotal, shipping, VAT-inclusive display metadata, and grand-total columns with database checks for non-negative components and arithmetic consistency where expressible. The post-MVP coupon slice adds discount totals and line snapshots through an expand-compatible migration. Application domain rules remain authoritative for transition meaning.
+
+Per-store `order_number_counters` allocate communication-friendly `ORD-` numbers transactionally. Inventory reservation `order_id` remains an opaque application reference because enforcing an Orders foreign key would break the existing standalone Inventory contract; checkout creates the order and reservations in one transaction through explicit module participants.
 
 ### Payments and refunds
 

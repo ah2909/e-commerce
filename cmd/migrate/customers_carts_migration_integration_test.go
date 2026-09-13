@@ -19,7 +19,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestCustomersCartsMigrationUpgradesPopulatedVersionFiveAndRepeats(t *testing.T) {
+func TestCustomersCartsAndCheckoutOrdersMigrationsUpgradePopulatedSchema(t *testing.T) {
 	poolConfig, err := pgxpool.ParseConfig(os.Getenv("TEST_DATABASE_URL"))
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +37,7 @@ func TestCustomersCartsMigrationUpgradesPopulatedVersionFiveAndRepeats(t *testin
 	guest, _ := ids.NewGuestID()
 	product, _ := ids.NewProductID()
 	variant, _ := ids.NewVariantID()
+	legacyOrder, _ := ids.NewOrderID()
 	schema := "customers_carts_" + strings.ReplaceAll(store.String(), "-", "")
 	identifier := pgx.Identifier{schema}.Sanitize()
 	if _, err := pool.Exec(context.Background(), "CREATE SCHEMA "+identifier); err != nil {
@@ -74,7 +75,13 @@ func TestCustomersCartsMigrationUpgradesPopulatedVersionFiveAndRepeats(t *testin
 	if _, err := db.ExecContext(ctx, `INSERT INTO catalog_variants(store_id,variant_id,product_id,sku,option_values,weight_grams,status,version,created_at,updated_at) VALUES($1::uuid,$2::uuid,$3::uuid,'CART','{}',0,'active',1,now(),now())`, store, variant, product); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpContext(ctx, db, migrations); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO inventory_stock_items(store_id,variant_id,on_hand,version,created_at,updated_at) VALUES($1::uuid,$2::uuid,2,1,now(),now())`, store, variant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO inventory_reservations(store_id,reservation_id,order_id,variant_id,quantity,status,expires_at,version,created_at,updated_at) VALUES($1::uuid,gen_random_uuid(),$2::uuid,$3::uuid,1,'active',now()+interval '10 minutes',1,now(),now())`, store, legacyOrder, variant); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpToContext(ctx, db, migrations, 6); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationVersion(t, ctx, db, 6)
@@ -91,10 +98,62 @@ func TestCustomersCartsMigrationUpgradesPopulatedVersionFiveAndRepeats(t *testin
 		t.Fatal("duplicate active user cart accepted")
 	}
 	assertCustomersCartsConstraints(t, ctx, db, store, user, guest, variant)
-	if err := goose.UpContext(ctx, db, migrations); err != nil {
+	if err := goose.UpToContext(ctx, db, migrations, 6); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrationVersion(t, ctx, db, 6)
+	if err := goose.UpToContext(ctx, db, migrations, 7); err != nil {
+		t.Fatal(err)
+	}
+	assertMigrationVersion(t, ctx, db, 7)
+	for _, table := range []string{"shipping_rules", "orders", "order_lines", "order_addresses", "order_guest_grants", "order_idempotency", "order_state_history", "payments"} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT to_regclass(current_schema()||'.'||$1) IS NOT NULL`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s exists = %v, error = %v", table, exists, err)
+		}
+	}
+	assertCheckoutOrdersConstraints(t, ctx, db, store, legacyOrder)
+	if err := goose.UpToContext(ctx, db, migrations, 7); err != nil {
+		t.Fatal(err)
+	}
+	assertMigrationVersion(t, ctx, db, 7)
+}
+
+func assertCheckoutOrdersConstraints(t *testing.T, ctx context.Context, db *sql.DB, store ids.StoreID, legacyOrder ids.OrderID) {
+	t.Helper()
+	for _, index := range []string{"shipping_rules_current_uidx", "orders_user_history_idx", "orders_guest_history_idx", "orders_pending_expiry_idx", "order_guest_grants_active_order_uidx", "order_state_history_order_idx"} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT to_regclass(current_schema()||'.'||$1) IS NOT NULL`, index).Scan(&exists); err != nil || !exists {
+			t.Fatalf("index %s exists = %v, error = %v", index, exists, err)
+		}
+	}
+	for table, constraints := range map[string][]string{
+		"shipping_rules":     {"shipping_rules_store_fk", "shipping_rules_mode_valid", "shipping_rules_amount_valid", "shipping_rules_currency_valid", "shipping_rules_lifecycle_valid"},
+		"orders":             {"orders_user_fk", "orders_guest_fk", "orders_customer_fk", "orders_cart_fk", "orders_shipping_rule_fk", "orders_number_unique", "orders_cart_unique", "orders_owner_valid", "orders_totals_valid", "orders_lifecycle_valid"},
+		"order_lines":        {"order_lines_order_fk", "order_lines_variant_fk", "order_lines_quantity_valid", "order_lines_totals_valid"},
+		"order_guest_grants": {"order_guest_grants_order_fk", "order_guest_grants_digest_valid", "order_guest_grants_expiry_valid"},
+		"order_idempotency":  {"order_idempotency_order_fk", "order_idempotency_key_valid", "order_idempotency_fingerprint_valid"},
+		"payments":           {"payments_order_fk", "payments_order_unique", "payments_provider_valid", "payments_amount_valid", "payments_lifecycle_valid"},
+		"carts":              {"carts_converted_order_fk", "carts_conversion_valid"},
+	} {
+		for _, constraint := range constraints {
+			var exists bool
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=$1 AND conrelid=(current_schema()||'.'||$2)::regclass)`, constraint, table).Scan(&exists); err != nil || !exists {
+				t.Fatalf("constraint %s exists = %v, error = %v", constraint, exists, err)
+			}
+		}
+	}
+	for constraint, expected := range map[string]bool{"carts_converted_order_fk": true, "carts_conversion_valid": false} {
+		var validated bool
+		if err := db.QueryRowContext(ctx, `SELECT convalidated FROM pg_constraint WHERE conname=$1 AND conrelid=(current_schema()||'.carts')::regclass`, constraint).Scan(&validated); err != nil || validated != expected {
+			t.Fatalf("constraint %s validated = %v, expected %v, error = %v", constraint, validated, expected, err)
+		}
+	}
+	var legacyCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM inventory_reservations WHERE store_id=$1::uuid AND order_id=$2::uuid`, store, legacyOrder).Scan(&legacyCount); err != nil || legacyCount != 1 {
+		t.Fatalf("legacy reservation count = %d, error = %v", legacyCount, err)
+	}
+	expectSQLFailure(t, ctx, db, `INSERT INTO shipping_rules(store_id,shipping_rule_id,mode,flat_amount_minor,currency,status,version,created_at,updated_at) VALUES($1::uuid,gen_random_uuid(),'free',1,'VND','active',1,now(),now())`, store)
 }
 
 func assertCustomersCartsConstraints(t *testing.T, ctx context.Context, db *sql.DB, store ids.StoreID, user ids.UserID, guest ids.GuestID, variant ids.VariantID) {

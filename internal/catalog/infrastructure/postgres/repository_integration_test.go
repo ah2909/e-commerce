@@ -223,7 +223,7 @@ func TestMigrationCreatesTenantConstraints(t *testing.T) {
 		t.Fatal("cross-store category assignment succeeded")
 	}
 	var version int64
-	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 6 {
+	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 7 {
 		t.Fatalf("schema version = %d, error = %v", version, err)
 	}
 }

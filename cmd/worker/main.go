@@ -13,13 +13,19 @@ import (
 	auditpostgres "github.com/ah2909/e-commerce/internal/audit/infrastructure/postgres"
 	cartspostgres "github.com/ah2909/e-commerce/internal/carts/infrastructure/postgres"
 	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
+	customerspostgres "github.com/ah2909/e-commerce/internal/customers/infrastructure/postgres"
 	eventingpostgres "github.com/ah2909/e-commerce/internal/eventing/infrastructure/postgres"
 	inventoryapplication "github.com/ah2909/e-commerce/internal/inventory/application"
 	inventorypostgres "github.com/ah2909/e-commerce/internal/inventory/infrastructure/postgres"
+	ordersapplication "github.com/ah2909/e-commerce/internal/orders/application"
+	orderspostgres "github.com/ah2909/e-commerce/internal/orders/infrastructure/postgres"
+	paymentspostgres "github.com/ah2909/e-commerce/internal/payments/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/platform/config"
 	"github.com/ah2909/e-commerce/internal/platform/database"
 	"github.com/ah2909/e-commerce/internal/platform/logging"
+	pricingpostgres "github.com/ah2909/e-commerce/internal/pricing/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
+	shippingpostgres "github.com/ah2909/e-commerce/internal/shipping/infrastructure/postgres"
 )
 
 func main() {
@@ -57,7 +63,13 @@ func run() error {
 	if schemaVersion >= 6 {
 		go runCartExpiry(ctx, cartspostgres.NewRepository(connection.GORM), cfg.CartExpiryBatch, cfg.CartExpiryPoll, cfg.DependencyTimeout, logger)
 	}
-	if schemaVersion >= 5 {
+	if schemaVersion >= 7 {
+		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
+		pricingRepository := pricingpostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker())
+		inventoryRepository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
+		orderRepository := orderspostgres.NewRepository(connection.GORM, cartspostgres.NewRepository(connection.GORM), catalogRepository, pricingRepository, customerspostgres.NewRepository(connection.GORM), shippingpostgres.NewRepository(connection.GORM), inventoryRepository, paymentspostgres.NewParticipant(), eventingpostgres.NewWriter())
+		runExpiry(ctx, ordersapplication.NewService(orderRepository), cfg.InventoryExpiryBatch, cfg.InventoryExpiryPoll, cfg.DependencyTimeout, logger)
+	} else if schemaVersion >= 5 {
 		repository := inventorypostgres.NewRepository(connection.GORM, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
 		service := inventoryapplication.NewService(repository)
 		runExpiry(ctx, service, cfg.InventoryExpiryBatch, cfg.InventoryExpiryPoll, cfg.DependencyTimeout, logger)
@@ -111,12 +123,12 @@ func runExpiry(ctx context.Context, processor expiryProcessor, batch int, poll, 
 		if err == nil {
 			processed, processErr := processor.ExpireDue(operationCtx, batch, correlationID.String())
 			if processErr != nil && !errors.Is(processErr, context.Canceled) {
-				logger.Error("inventory expiry failed", "error", processErr)
+				logger.Error("order expiry failed", "error", processErr)
 			} else if processed > 0 {
-				logger.Info("inventory reservations expired", "count", processed)
+				logger.Info("pending orders expired", "count", processed)
 			}
 		} else {
-			logger.Error("inventory expiry correlation failed", "error", err)
+			logger.Error("order expiry correlation failed", "error", err)
 		}
 		cancel()
 		select {

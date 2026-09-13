@@ -294,10 +294,20 @@ func (repository *Repository) Adjust(ctx context.Context, storeID ids.StoreID, v
 }
 
 func (repository *Repository) Reserve(ctx context.Context, storeID ids.StoreID, orderID ids.OrderID, allocations []domain.Allocation, correlationID string) ([]domain.Reservation, error) {
+	var result []domain.Reservation
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		result, err = repository.ReserveInTransaction(ctx, tx, storeID, orderID, allocations, correlationID)
+		return err
+	})
+	return result, err
+}
+
+func (repository *Repository) ReserveInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID, allocations []domain.Allocation, correlationID string) ([]domain.Reservation, error) {
 	ordered := append([]domain.Allocation(nil), allocations...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].VariantID.String() < ordered[j].VariantID.String() })
 	var result []domain.Reservation
-	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := func() error {
 		if err := lockKey(tx, storeID.String()+":order:"+orderID.String()); err != nil {
 			return err
 		}
@@ -363,7 +373,7 @@ func (repository *Repository) Reserve(ctx context.Context, storeID ids.StoreID, 
 			}
 		}
 		return nil
-	})
+	}()
 	return result, err
 }
 
