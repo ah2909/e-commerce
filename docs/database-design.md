@@ -174,6 +174,7 @@ Per-store `order_number_counters` allocate communication-friendly `ORD-` numbers
 | `payment_provider_configs` | Enabled provider and encrypted settings | PK `(store_id,provider)`; key version; version; no plaintext secret |
 | `payments` | Order-level payable amount and state | PK `(store_id,payment_id)`; tenant order FK; state/version indexes |
 | `payment_attempts` | Provider/manual attempt and idempotency | PK `(store_id,attempt_id)`; unique `(store_id,provider,idempotency_key)`; provider reference index |
+| `payment_manual_confirmations` | Audited staff confirmation receipt | PK `(store_id,confirmation_id)`; unique tenant payment/idempotency and transfer-reference keys |
 | `payment_webhook_receipts` | Validated/deduplicated callback receipt | PK `(store_id,provider,provider_event_id)`; body digest; processing/received index |
 | `payment_reconciliation_items` | Late/mismatched/ambiguous funds | PK `(store_id,reconciliation_id)`; unresolved age index |
 | `refunds` | Full-refund workflow | PK `(store_id,refund_id)`; payment FK; unique idempotency/provider references |
@@ -181,6 +182,8 @@ Per-store `order_number_counters` allocate communication-friendly `ORD-` numbers
 Webhook processing inserts or claims the receipt and applies the business effect in one PostgreSQL transaction. When the store cannot be trusted from the payload, a server-owned provider configuration/reference resolves the candidate store before tenant-scoped loading; all signed fields are still validated.
 
 Provider configuration ciphertext contains algorithm, nonce, ciphertext, and key version in bounded binary/text columns. The encryption master or wrapping key remains outside PostgreSQL.
+
+Migration 8 implements versioned encrypted VietQR configuration, encrypted attempt snapshots, idempotent manual confirmations, reconciliation items, and versioned explicit staff payment permissions. MoMo webhook receipts and refunds remain target-schema work.
 
 ### Shipping
 

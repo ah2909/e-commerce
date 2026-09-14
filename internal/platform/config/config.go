@@ -91,6 +91,8 @@ type Config struct {
 	InventoryExpiryPoll        time.Duration
 	CartExpiryBatch            int
 	CartExpiryPoll             time.Duration
+	PaymentConfigKeys          map[int][32]byte
+	PaymentConfigActiveVersion int
 }
 
 type LookupFunc func(string) (string, bool)
@@ -239,6 +241,10 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	paymentKeys, activePaymentKey, err := paymentKeyring(lookup, appEnv)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
@@ -278,6 +284,8 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		InventoryExpiryPoll:        inventoryExpiryPoll,
 		CartExpiryBatch:            cartExpiryBatch,
 		CartExpiryPoll:             cartExpiryPoll,
+		PaymentConfigKeys:          paymentKeys,
+		PaymentConfigActiveVersion: activePaymentKey,
 	}, nil
 }
 
@@ -398,6 +406,46 @@ func platformToken(lookup LookupFunc) ([32]byte, error) {
 		return [32]byte{}, fmt.Errorf("PLATFORM_ADMIN_TOKEN must be unpadded base64url encoding exactly 32 bytes")
 	}
 	return [32]byte(decoded), nil
+}
+
+func paymentKeyring(lookup LookupFunc, appEnv string) (map[int][32]byte, int, error) {
+	rawKeys := optionalEmpty(lookup, "PAYMENT_CONFIG_KEYS")
+	rawActive := optionalEmpty(lookup, "PAYMENT_CONFIG_ACTIVE_KEY_VERSION")
+	if rawKeys == "" && rawActive == "" {
+		return nil, 0, nil
+	}
+	if rawKeys == "" || rawActive == "" {
+		return nil, 0, fmt.Errorf("PAYMENT_CONFIG_KEYS and PAYMENT_CONFIG_ACTIVE_KEY_VERSION must be configured together")
+	}
+	active, err := strconv.Atoi(rawActive)
+	if err != nil || active < 1 {
+		return nil, 0, fmt.Errorf("PAYMENT_CONFIG_ACTIVE_KEY_VERSION must be a positive integer")
+	}
+	parts := strings.Split(rawKeys, ",")
+	if len(parts) > 8 {
+		return nil, 0, fmt.Errorf("PAYMENT_CONFIG_KEYS must contain at most 8 keys")
+	}
+	keys := make(map[int][32]byte, len(parts))
+	for _, part := range parts {
+		versionText, encoded, ok := strings.Cut(strings.TrimSpace(part), ":")
+		version, parseErr := strconv.Atoi(versionText)
+		decoded, decodeErr := base64.RawURLEncoding.DecodeString(encoded)
+		if !ok || parseErr != nil || version < 1 || decodeErr != nil || len(decoded) != 32 {
+			return nil, 0, fmt.Errorf("PAYMENT_CONFIG_KEYS must use version:unpadded-base64url-32-byte entries")
+		}
+		if _, exists := keys[version]; exists {
+			return nil, 0, fmt.Errorf("PAYMENT_CONFIG_KEYS contains a duplicate version")
+		}
+		key := [32]byte(decoded)
+		if appEnv == "production" && key == [32]byte{} {
+			return nil, 0, fmt.Errorf("PAYMENT_CONFIG_KEYS must not contain the development key in production")
+		}
+		keys[version] = key
+	}
+	if _, ok := keys[active]; !ok {
+		return nil, 0, fmt.Errorf("PAYMENT_CONFIG_ACTIVE_KEY_VERSION must identify a configured key")
+	}
+	return keys, active, nil
 }
 
 func parseCIDRs(value string) ([]netip.Prefix, error) {

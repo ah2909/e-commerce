@@ -15,6 +15,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/catalog/application"
 	"github.com/ah2909/e-commerce/internal/catalog/domain"
 	catalogpostgres "github.com/ah2909/e-commerce/internal/catalog/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/platform/database"
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
@@ -223,7 +224,7 @@ func TestMigrationCreatesTenantConstraints(t *testing.T) {
 		t.Fatal("cross-store category assignment succeeded")
 	}
 	var version int64
-	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != 7 {
+	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(max(version_id),0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != database.CurrentSchemaVersion {
 		t.Fatalf("schema version = %d, error = %v", version, err)
 	}
 }

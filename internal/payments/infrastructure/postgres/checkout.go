@@ -52,6 +52,9 @@ func (Participant) ExpireInTransaction(ctx context.Context, tx *gorm.DB, storeID
 	if err != nil {
 		return domain.Payment{}, err
 	}
+	if row.State == "reconciliation_required" {
+		return mapPayment(row)
+	}
 	if row.State != "pending" {
 		return domain.Payment{}, domain.ErrInvalidPayment
 	}

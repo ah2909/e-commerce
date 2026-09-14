@@ -42,7 +42,7 @@ func NewRecord(storeID ids.StoreID, actorType ActorType, actorID, action, subjec
 	if storeID == "" || (actorType != ActorPlatformAdmin && actorType != ActorUser) || actorID == "" || subjectID == "" || requestID == "" || occurredAt.IsZero() {
 		return Record{}, ErrInvalidRecord
 	}
-	validSubject := (action == "store.created" && subjectType == "store") || ((action == "membership.created" || action == "membership.updated") && subjectType == "membership") || (action == "inventory.adjusted" && subjectType == "inventory_stock_item")
+	validSubject := (action == "store.created" && subjectType == "store") || ((action == "membership.created" || action == "membership.updated" || action == "membership.permissions_updated") && subjectType == "membership") || (action == "inventory.adjusted" && subjectType == "inventory_stock_item") || (action == "payment.provider_configured" && subjectType == "payment_provider_config") || ((action == "payment.confirmed" || action == "payment.reconciliation_recorded") && subjectType == "payment")
 	if !validSubject {
 		return Record{}, ErrInvalidRecord
 	}

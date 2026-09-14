@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("inventory resource not found")
-	ErrConflict = errors.New("inventory conflict")
+	ErrNotFound               = errors.New("inventory resource not found")
+	ErrConflict               = errors.New("inventory conflict")
+	ErrReservationUnavailable = errors.New("inventory reservation unavailable")
 )
 
 const MaxPageSize = 100

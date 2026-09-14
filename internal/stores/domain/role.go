@@ -20,6 +20,8 @@ const (
 	PermissionPricingManage     Permission = "pricing.manage"
 	PermissionInventoryView     Permission = "inventory.view"
 	PermissionInventoryManage   Permission = "inventory.manage"
+	PermissionPaymentConfirm    Permission = "payment.confirm"
+	PermissionPaymentReconcile  Permission = "payment.reconcile.view"
 )
 
 func ParseRole(value string) (Role, error) {
@@ -33,9 +35,9 @@ func ParseRole(value string) (Role, error) {
 func (role Role) Allows(permission Permission) bool {
 	switch role {
 	case RoleOwner:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile
 	case RoleAdmin:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile
 	case RoleStaff:
 		return permission == PermissionStoreView
 	default:

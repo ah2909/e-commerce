@@ -382,7 +382,7 @@ func (repository *Repository) ExpireDue(ctx context.Context, limit int, correlat
 			if err != nil {
 				return err
 			}
-			if payment.State != "expired" {
+			if payment.State != "expired" && payment.State != "reconciliation_required" {
 				return application.ErrConflict
 			}
 			expired, err := repository.inventory.ExpireOrderInTransaction(ctx, tx, storeID, orderID, now, correlationID)

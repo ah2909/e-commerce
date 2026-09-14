@@ -38,6 +38,8 @@ func TestLoadFrom(t *testing.T) {
 	values["INVENTORY_EXPIRY_POLL"] = "2s"
 	values["CART_EXPIRY_BATCH"] = "30"
 	values["CART_EXPIRY_POLL"] = "3m"
+	values["PAYMENT_CONFIG_KEYS"] = "3:" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x24}, 32))
+	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "3"
 
 	got, err := LoadFrom(mapLookup(values))
 	if err != nil {
@@ -78,6 +80,9 @@ func TestLoadFrom(t *testing.T) {
 	}
 	if got.CartExpiryBatch != 30 || got.CartExpiryPoll != 3*time.Minute {
 		t.Fatalf("LoadFrom() cart worker fields = %#v", got)
+	}
+	if got.PaymentConfigActiveVersion != 3 || got.PaymentConfigKeys[3] != [32]byte(bytes.Repeat([]byte{0x24}, 32)) {
+		t.Fatalf("LoadFrom() payment keyring mismatch")
 	}
 }
 
@@ -148,6 +153,7 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "external return URL", key: "SOCIAL_RETURN_PATHS", value: "https://evil.example/callback", want: "SOCIAL_RETURN_PATHS"},
 		{name: "large inventory batch", key: "INVENTORY_EXPIRY_BATCH", value: "101", want: "INVENTORY_EXPIRY_BATCH"},
 		{name: "large inventory poll", key: "INVENTORY_EXPIRY_POLL", value: "61s", want: "INVENTORY_EXPIRY_POLL"},
+		{name: "payment keys without active version", key: "PAYMENT_CONFIG_KEYS", value: "1:" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), want: "configured together"},
 	}
 
 	for _, test := range tests {
@@ -171,6 +177,17 @@ func TestLoadFromProductionRequiresExplicitPlatformToken(t *testing.T) {
 	delete(values, "PLATFORM_ADMIN_TOKEN")
 	_, err := LoadFrom(mapLookup(values))
 	if err == nil || !strings.Contains(err.Error(), "PLATFORM_ADMIN_TOKEN is required") {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+}
+
+func TestLoadFromProductionRejectsDevelopmentPaymentKey(t *testing.T) {
+	values := validEnvironment()
+	values["APP_ENV"] = "production"
+	values["PAYMENT_CONFIG_KEYS"] = "1:" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "1"
+	_, err := LoadFrom(mapLookup(values))
+	if err == nil || !strings.Contains(err.Error(), "development key") {
 		t.Fatalf("LoadFrom() error = %v", err)
 	}
 }

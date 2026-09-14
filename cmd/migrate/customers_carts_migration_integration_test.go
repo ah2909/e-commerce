@@ -117,6 +117,26 @@ func TestCustomersCartsAndCheckoutOrdersMigrationsUpgradePopulatedSchema(t *test
 		t.Fatal(err)
 	}
 	assertMigrationVersion(t, ctx, db, 7)
+	if err := goose.UpToContext(ctx, db, migrations, 8); err != nil {
+		t.Fatal(err)
+	}
+	assertMigrationVersion(t, ctx, db, 8)
+	for _, table := range []string{"store_membership_permission_sets", "store_membership_permissions", "payment_provider_configs", "payment_attempts", "payment_manual_confirmations", "payment_reconciliation_items"} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT to_regclass(current_schema()||'.'||$1) IS NOT NULL`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s exists = %v, error = %v", table, exists, err)
+		}
+	}
+	for table, constraint := range map[string]string{"payment_attempts": "payment_attempts_payment_unique", "payment_manual_confirmations": "payment_manual_confirmations_idempotency_unique", "store_membership_permissions": "store_membership_permissions_name_valid"} {
+		var exists bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=$1 AND conrelid=(current_schema()||'.'||$2)::regclass)`, constraint, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("constraint %s exists = %v, error = %v", constraint, exists, err)
+		}
+	}
+	if err := goose.UpToContext(ctx, db, migrations, 8); err != nil {
+		t.Fatal(err)
+	}
+	assertMigrationVersion(t, ctx, db, 8)
 }
 
 func assertCheckoutOrdersConstraints(t *testing.T, ctx context.Context, db *sql.DB, store ids.StoreID, legacyOrder ids.OrderID) {

@@ -45,6 +45,32 @@ func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware)
 	router.PATCH("/api/v1/memberships/:user_id", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionMembershipsManage, handler.logger), handler.updateMembership)
 }
 
+func (handler Handler) RegisterPaymentPermissions(router gin.IRoutes, hosts tenant.HostMiddleware) {
+	router.PATCH("/api/v1/memberships/:user_id/permissions", hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin(), authz.RequireGin(domain.PermissionMembershipsManage, handler.logger), handler.replacePermissions)
+}
+
+func (handler Handler) replacePermissions(ctx *gin.Context) {
+	var body struct {
+		ExpectedVersion int64    `json:"expected_membership_version"`
+		Permissions     []string `json:"permissions"`
+	}
+	if !decode(ctx.Writer, ctx.Request, &body) {
+		return
+	}
+	targetID, err := ids.ParseUserID(ctx.Param("user_id"))
+	if err != nil {
+		handler.membershipError(ctx.Writer, ctx.Request, application.ErrMembershipTarget)
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	version, err := handler.memberships.ReplacePermissions(ctx.Request.Context(), application.ReplacePermissionsCommand{StoreID: resolved.StoreID(), ActorID: resolved.UserID(), UserID: targetID, Permissions: body.Permissions, ExpectedVersion: body.ExpectedVersion, RequestID: httpserver.RequestID(ctx.Request.Context())})
+	if err != nil {
+		handler.membershipError(ctx.Writer, ctx.Request, err)
+		return
+	}
+	writeJSON(ctx.Writer, http.StatusOK, map[string]any{"user_id": targetID.String(), "permissions": body.Permissions, "version": version})
+}
+
 func registerGet(router gin.IRoutes, path string, handlers ...gin.HandlerFunc) {
 	router.GET(path, handlers...)
 	router.HEAD(path, handlers...)

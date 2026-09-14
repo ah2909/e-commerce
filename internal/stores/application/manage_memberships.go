@@ -23,6 +23,7 @@ type MembershipRepository interface {
 	ListMemberships(context.Context, ids.StoreID) ([]domain.Membership, error)
 	CreateMembership(context.Context, domain.Membership, ids.UserID, string) error
 	UpdateMembership(context.Context, ids.StoreID, ids.UserID, domain.Role, domain.MembershipStatus, ids.UserID, string, time.Time) (domain.Membership, error)
+	ReplaceStaffPermissions(context.Context, ids.StoreID, ids.UserID, []domain.Permission, int64, ids.UserID, string, time.Time) (int64, error)
 }
 
 type MembershipManager struct {
@@ -46,6 +47,15 @@ type UpdateMembershipCommand struct {
 	Role      string
 	Status    string
 	RequestID string
+}
+
+type ReplacePermissionsCommand struct {
+	StoreID         ids.StoreID
+	ActorID         ids.UserID
+	UserID          ids.UserID
+	Permissions     []string
+	ExpectedVersion int64
+	RequestID       string
 }
 
 func NewMembershipManager(repository MembershipRepository, users UserDirectory, now func() time.Time) MembershipManager {
@@ -92,4 +102,24 @@ func (manager MembershipManager) Update(ctx context.Context, command UpdateMembe
 		return domain.Membership{}, fmt.Errorf("update membership: %w", domain.ErrInvalidMembership)
 	}
 	return manager.repository.UpdateMembership(ctx, command.StoreID, command.UserID, role, status, command.ActorID, command.RequestID, manager.now().UTC())
+}
+
+func (manager MembershipManager) ReplacePermissions(ctx context.Context, command ReplacePermissionsCommand) (int64, error) {
+	if command.StoreID == "" || command.ActorID == "" || command.UserID == "" || command.ExpectedVersion < 0 || command.RequestID == "" || len(command.Permissions) > 2 {
+		return 0, domain.ErrInvalidMembership
+	}
+	seen := map[domain.Permission]struct{}{}
+	permissions := make([]domain.Permission, 0, len(command.Permissions))
+	for _, value := range command.Permissions {
+		permission := domain.Permission(value)
+		if permission != domain.PermissionPaymentConfirm && permission != domain.PermissionPaymentReconcile {
+			return 0, domain.ErrInvalidMembership
+		}
+		if _, exists := seen[permission]; exists {
+			return 0, domain.ErrInvalidMembership
+		}
+		seen[permission] = struct{}{}
+		permissions = append(permissions, permission)
+	}
+	return manager.repository.ReplaceStaffPermissions(ctx, command.StoreID, command.UserID, permissions, command.ExpectedVersion, command.ActorID, command.RequestID, manager.now().UTC())
 }

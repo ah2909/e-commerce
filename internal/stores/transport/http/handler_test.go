@@ -30,6 +30,10 @@ func (spy *membershipRepositorySpy) UpdateMembership(context.Context, ids.StoreI
 	return domain.Membership{}, nil
 }
 
+func (spy *membershipRepositorySpy) ReplaceStaffPermissions(context.Context, ids.StoreID, ids.UserID, []domain.Permission, int64, ids.UserID, string, time.Time) (int64, error) {
+	return 1, nil
+}
+
 type membershipDirectorySpy struct{ calls int }
 
 func (spy *membershipDirectorySpy) IsActiveUser(context.Context, ids.StoreID, ids.UserID) (bool, error) {

@@ -11,9 +11,11 @@ import (
 )
 
 type managementRepositoryStub struct {
-	created     domain.Membership
-	updated     domain.Membership
-	createCalls int
+	created         domain.Membership
+	updated         domain.Membership
+	createCalls     int
+	permissionCalls int
+	permissions     []domain.Permission
 }
 
 func (stub *managementRepositoryStub) ListMemberships(context.Context, ids.StoreID) ([]domain.Membership, error) {
@@ -28,6 +30,29 @@ func (stub *managementRepositoryStub) UpdateMembership(_ context.Context, storeI
 	membership, err := domain.RestoreMembershipWithRole(storeID, userID, status, role, now, now)
 	stub.updated = membership
 	return membership, err
+}
+func (stub *managementRepositoryStub) ReplaceStaffPermissions(_ context.Context, _ ids.StoreID, _ ids.UserID, permissions []domain.Permission, expected int64, _ ids.UserID, _ string, _ time.Time) (int64, error) {
+	stub.permissionCalls++
+	stub.permissions = append([]domain.Permission(nil), permissions...)
+	return expected + 1, nil
+}
+
+func TestMembershipManagerValidatesExplicitPaymentPermissions(t *testing.T) {
+	storeID, _ := ids.ParseStoreID(storeIDText)
+	actorID, _ := ids.ParseUserID(userIDText)
+	targetID, _ := ids.ParseUserID("128f0f7d-7b3d-7d2e-8f4f-3b86f31f2743")
+	repository := &managementRepositoryStub{}
+	manager := NewMembershipManager(repository, userDirectoryStub{}, time.Now)
+	version, err := manager.ReplacePermissions(context.Background(), ReplacePermissionsCommand{StoreID: storeID, ActorID: actorID, UserID: targetID, Permissions: []string{"payment.confirm", "payment.reconcile.view"}, ExpectedVersion: 3, RequestID: "request"})
+	if err != nil || version != 4 || repository.permissionCalls != 1 || len(repository.permissions) != 2 {
+		t.Fatalf("version = %d, permissions = %#v, calls = %d, error = %v", version, repository.permissions, repository.permissionCalls, err)
+	}
+	if _, err := manager.ReplacePermissions(context.Background(), ReplacePermissionsCommand{StoreID: storeID, ActorID: actorID, UserID: targetID, Permissions: []string{"inventory.manage"}, RequestID: "request"}); !errors.Is(err, domain.ErrInvalidMembership) {
+		t.Fatalf("invalid permission error = %v", err)
+	}
+	if repository.permissionCalls != 1 {
+		t.Fatalf("repository calls after invalid permission = %d", repository.permissionCalls)
+	}
 }
 
 type userDirectoryStub struct {

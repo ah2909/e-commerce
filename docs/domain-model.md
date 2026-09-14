@@ -184,6 +184,8 @@ Rules:
 
 A store may enable VietQR, MoMo, or both. Configuration records provider, public settings, encrypted secret envelope, key version, status, and version. Reads redact secrets.
 
+The current VietQR slice validates a six-digit bank BIN, a numeric account number, and a normalized ASCII beneficiary name. Configuration and instruction snapshots are encrypted with versioned deployment keys; API reads return only the masked account number.
+
 ### Payment and attempt
 
 A payment binds one order, amount, VND currency, provider, and state. An attempt records a store-scoped idempotency key, provider reference, request fingerprint, response classification, deadline, and lifecycle.
@@ -208,6 +210,7 @@ Rules:
 - Provider event IDs and idempotency keys use tenant-aware unique constraints.
 - Duplicate callbacks acknowledge prior processing without duplicating effects.
 - VietQR generation produces `action_required`; only an authorized audited confirmation produces success.
+- Owner/admin may confirm or inspect reconciliation by default; staff require the matching explicit, versioned tenant permission.
 - MoMo success requires a verified provider response or raw-body signed webhook.
 - Late, wrong-amount, or wrong-reference funds enter reconciliation and do not restore expired commerce state automatically.
 - Confirmation locks and rechecks order, payment, reservations, and stock items in the global order using database time; it either consumes `on_hand` and commits all ledger/paid/confirmed states together or records received funds for reconciliation.

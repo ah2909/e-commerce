@@ -78,6 +78,60 @@ func TestRepositoryRejectsCrossStoreUserMembership(t *testing.T) {
 	}
 }
 
+func TestStaffPaymentPermissionsAreExplicitVersionedAndTenantScoped(t *testing.T) {
+	pool := integrationPool(t, nil)
+	pair := storefixture.NewPair(t, pool)
+	repository := storepostgres.NewRepository(gormtest.FromPool(t, pool), auditpostgres.NewWriter())
+	staffID, _ := ids.NewUserID()
+	insertTenantUser(t, pool, pair.A.Store.ID(), staffID)
+	staff, err := domain.NewMembershipWithRole(pair.A.Store.ID(), staffID, domain.RoleStaff, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateMembership(context.Background(), staff, pair.A.UserID, "staff-create"); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := repository.HasPermission(context.Background(), pair.A.Store.ID(), staffID, domain.PermissionPaymentConfirm)
+	if err != nil || allowed {
+		t.Fatalf("initial permission = %v, error = %v", allowed, err)
+	}
+	version, err := repository.ReplaceStaffPermissions(context.Background(), pair.A.Store.ID(), staffID, []domain.Permission{domain.PermissionPaymentConfirm}, 0, pair.A.UserID, "permission-grant", time.Now().UTC())
+	if err != nil || version != 1 {
+		t.Fatalf("grant version = %d, error = %v", version, err)
+	}
+	allowed, err = repository.HasPermission(context.Background(), pair.A.Store.ID(), staffID, domain.PermissionPaymentConfirm)
+	if err != nil || !allowed {
+		t.Fatalf("granted permission = %v, error = %v", allowed, err)
+	}
+	transaction := gormtest.FromPool(t, pool).Begin()
+	allowed, err = repository.HasPermissionInTransaction(context.Background(), transaction, pair.A.Store.ID(), staffID, string(domain.PermissionPaymentConfirm))
+	_ = transaction.Rollback().Error
+	if err != nil || !allowed {
+		t.Fatalf("transactional permission = %v, error = %v", allowed, err)
+	}
+	for _, probe := range []struct {
+		storeID ids.StoreID
+		userID  ids.UserID
+	}{{pair.B.Store.ID(), staffID}, {pair.A.Store.ID(), pair.B.UserID}} {
+		allowed, err = repository.HasPermission(context.Background(), probe.storeID, probe.userID, domain.PermissionPaymentConfirm)
+		if err != nil || allowed {
+			t.Fatalf("cross-store permission = %v, error = %v", allowed, err)
+		}
+	}
+	if _, err := repository.ReplaceStaffPermissions(context.Background(), pair.A.Store.ID(), staffID, nil, 0, pair.A.UserID, "stale-grant", time.Now().UTC()); !errors.Is(err, application.ErrMembershipTarget) {
+		t.Fatalf("stale permission update error = %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE store_memberships SET status='inactive' WHERE store_id=$1 AND user_id=$2`, pair.A.Store.ID(), staffID); err != nil {
+		t.Fatal(err)
+	}
+	transaction = gormtest.FromPool(t, pool).Begin()
+	allowed, err = repository.HasPermissionInTransaction(context.Background(), transaction, pair.A.Store.ID(), staffID, string(domain.PermissionPaymentConfirm))
+	_ = transaction.Rollback().Error
+	if err != nil || allowed {
+		t.Fatalf("inactive transactional permission = %v, error = %v", allowed, err)
+	}
+}
+
 func TestMembershipMutationsAreScopedAuditedAndKeepAnOwner(t *testing.T) {
 	pool := integrationPool(t, nil)
 	pair := storefixture.NewPair(t, pool)

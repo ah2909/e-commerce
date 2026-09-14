@@ -12,6 +12,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -50,6 +51,26 @@ type membershipRow struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at"`
 }
+
+type membershipPermissionRow struct {
+	StoreID    string    `gorm:"column:store_id;primaryKey"`
+	UserID     string    `gorm:"column:user_id;primaryKey"`
+	Permission string    `gorm:"column:permission;primaryKey"`
+	Version    int64     `gorm:"column:version"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at"`
+}
+
+func (membershipPermissionRow) TableName() string { return "store_membership_permissions" }
+
+type membershipPermissionSetRow struct {
+	StoreID   string    `gorm:"column:store_id;primaryKey"`
+	UserID    string    `gorm:"column:user_id;primaryKey"`
+	Version   int64     `gorm:"column:version"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (membershipPermissionSetRow) TableName() string { return "store_membership_permission_sets" }
 
 func (membershipRow) TableName() string { return "store_memberships" }
 
@@ -174,6 +195,95 @@ func (repository *Repository) UpdateMembership(ctx context.Context, storeID ids.
 		return err
 	})
 	return updated, err
+}
+
+func (repository *Repository) ReplaceStaffPermissions(ctx context.Context, storeID ids.StoreID, userID ids.UserID, permissions []domain.Permission, expected int64, actorID ids.UserID, requestID string, now time.Time) (int64, error) {
+	var version int64
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockOwner(ctx, tx, storeID, actorID); err != nil {
+			return err
+		}
+		var membership membershipRow
+		err := tx.Raw(`SELECT store_id::text,user_id::text,status,role,created_at,updated_at FROM store_memberships WHERE store_id=?::uuid AND user_id=?::uuid FOR UPDATE`, storeID.String(), userID.String()).Row().Scan(&membership.StoreID, &membership.UserID, &membership.Status, &membership.Role, &membership.CreatedAt, &membership.UpdatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return application.ErrMembershipTarget
+		}
+		if err != nil {
+			return fmt.Errorf("lock staff membership: %w", err)
+		}
+		if membership.Status != string(domain.MembershipStatusActive) || membership.Role != string(domain.RoleStaff) {
+			return application.ErrMembershipTarget
+		}
+		var set membershipPermissionSetRow
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("store_id=? AND user_id=?", storeID.String(), userID.String()).First(&set).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			set = membershipPermissionSetRow{StoreID: storeID.String(), UserID: userID.String(), Version: 0, UpdatedAt: now}
+			if err := tx.Create(&set).Error; err != nil {
+				return fmt.Errorf("create membership permission set: %w", err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("lock membership permission set: %w", err)
+		}
+		if set.Version != expected {
+			return application.ErrMembershipTarget
+		}
+		version = set.Version + 1
+		advanced := tx.Model(&membershipPermissionSetRow{}).Where("store_id=? AND user_id=? AND version=?", storeID.String(), userID.String(), set.Version).Updates(map[string]any{"version": version, "updated_at": now})
+		if advanced.Error != nil || advanced.RowsAffected != 1 {
+			if advanced.Error != nil {
+				return fmt.Errorf("advance membership permission set: %w", advanced.Error)
+			}
+			return application.ErrMembershipTarget
+		}
+		if err := tx.Where("store_id=? AND user_id=?", storeID.String(), userID.String()).Delete(&membershipPermissionRow{}).Error; err != nil {
+			return fmt.Errorf("replace membership permissions: %w", err)
+		}
+		for _, permission := range permissions {
+			row := membershipPermissionRow{StoreID: storeID.String(), UserID: userID.String(), Permission: string(permission), Version: version, CreatedAt: now, UpdatedAt: now}
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("insert membership permission: %w", err)
+			}
+		}
+		return repository.insertAudit(ctx, tx, storeID, auditdomain.ActorUser, actorID.String(), "membership.permissions_updated", "membership", userID.String(), requestID, now)
+	})
+	return version, err
+}
+
+func (repository *Repository) HasPermission(ctx context.Context, storeID ids.StoreID, userID ids.UserID, permission domain.Permission) (bool, error) {
+	var allowed bool
+	err := repository.db.WithContext(ctx).Raw(`SELECT EXISTS (SELECT 1 FROM store_memberships m JOIN store_membership_permissions p ON p.store_id=m.store_id AND p.user_id=m.user_id WHERE m.store_id=?::uuid AND m.user_id=?::uuid AND m.status='active' AND m.role='staff' AND p.permission=?)`, storeID.String(), userID.String(), string(permission)).Scan(&allowed).Error
+	return allowed, err
+}
+
+func (repository *Repository) HasPermissionInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, userID ids.UserID, permission string) (bool, error) {
+	var store storeRow
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).Select("store_id", "status").Where("store_id=? AND status='active'", storeID.String()).First(&store).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	var row membershipRow
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).Where("store_id=? AND user_id=?", storeID.String(), userID.String()).First(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if row.Status != string(domain.MembershipStatusActive) {
+		return false, nil
+	}
+	role := domain.Role(row.Role)
+	requested := domain.Permission(permission)
+	if role.Allows(requested) {
+		return true, nil
+	}
+	if role != domain.RoleStaff || (requested != domain.PermissionPaymentConfirm && requested != domain.PermissionPaymentReconcile) {
+		return false, nil
+	}
+	var count int64
+	if err := tx.WithContext(ctx).Model(&membershipPermissionRow{}).Where("store_id=? AND user_id=? AND permission=?", storeID.String(), userID.String(), permission).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count == 1, nil
 }
 
 func lockOwner(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, actorID ids.UserID) error {

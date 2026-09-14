@@ -38,7 +38,11 @@ import (
 	ordersapplication "github.com/ah2909/e-commerce/internal/orders/application"
 	orderspostgres "github.com/ah2909/e-commerce/internal/orders/infrastructure/postgres"
 	ordershttp "github.com/ah2909/e-commerce/internal/orders/transport/http"
+	paymentsapplication "github.com/ah2909/e-commerce/internal/payments/application"
 	paymentspostgres "github.com/ah2909/e-commerce/internal/payments/infrastructure/postgres"
+	paymentsecret "github.com/ah2909/e-commerce/internal/payments/infrastructure/secret"
+	paymentvietqr "github.com/ah2909/e-commerce/internal/payments/infrastructure/vietqr"
+	paymentshttp "github.com/ah2909/e-commerce/internal/payments/transport/http"
 	"github.com/ah2909/e-commerce/internal/platform/adminauth"
 	"github.com/ah2909/e-commerce/internal/platform/clientaddr"
 	"github.com/ah2909/e-commerce/internal/platform/config"
@@ -199,6 +203,16 @@ func run() error {
 				orderRepository := orderspostgres.NewRepository(connection.GORM, cartRepository, catalogRepository, pricingRepository, customerRepository, shippingRepository, inventoryRepository, paymentspostgres.NewParticipant(), eventingpostgres.NewWriter())
 				orderService := ordersapplication.NewService(orderRepository)
 				ordershttp.NewHandler(orderService, identityService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+				if paymentsAvailable(schemaVersion) {
+					storesHandler.RegisterPaymentPermissions(engine, hostMiddleware)
+					keyring, err := paymentsecret.New(cfg.PaymentConfigKeys, cfg.PaymentConfigActiveVersion)
+					if err != nil {
+						return fmt.Errorf("initialize payment configuration encryption: %w", err)
+					}
+					paymentRepository := paymentspostgres.NewRepository(connection.GORM, keyring, paymentvietqr.Encoder{}, orderRepository, inventoryRepository, auditpostgres.NewWriter(), eventingpostgres.NewWriter(), storeRepository)
+					paymentService := paymentsapplication.NewService(paymentRepository)
+					paymentshttp.NewHandler(paymentService, orderService, identityService, identityHandler.AuthenticateUser(), tenantMiddleware, storeRepository, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+				}
 			}
 		}
 	} else {
@@ -232,6 +246,7 @@ func pricingAvailable(schemaVersion int64) bool   { return schemaVersion >= 4 }
 func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
 func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
 func ordersAvailable(schemaVersion int64) bool    { return schemaVersion >= 7 }
+func paymentsAvailable(schemaVersion int64) bool  { return schemaVersion >= 8 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)
