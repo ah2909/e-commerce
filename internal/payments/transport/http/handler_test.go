@@ -27,6 +27,32 @@ type paymentServiceStub struct {
 	confirmation application.ConfirmationCommand
 }
 
+type momoServiceStub struct {
+	start         application.InstructionCommand
+	callbackToken string
+	raw           []byte
+	err           error
+}
+
+func (*momoServiceStub) GetMoMoConfig(context.Context, ids.StoreID) (domain.MoMoConfig, error) {
+	return domain.MoMoConfig{}, application.ErrNotFound
+}
+
+func (*momoServiceStub) ReplaceMoMoConfig(context.Context, ids.StoreID, ids.UserID, string, int64, domain.MoMoConfigDraft) (domain.MoMoConfig, error) {
+	return domain.MoMoConfig{}, nil
+}
+
+func (stub *momoServiceStub) StartMoMo(_ context.Context, command application.InstructionCommand) (domain.MoMoAttempt, error) {
+	stub.start = command
+	return domain.MoMoAttempt{AttemptID: ids.PaymentAttemptID("128f0f7d-7b3d-4d2e-8f4f-3b86f31f2743"), Created: true}, stub.err
+}
+
+func (stub *momoServiceStub) HandleMoMoIPN(_ context.Context, callbackToken string, raw []byte, _ string) (domain.WebhookResult, error) {
+	stub.callbackToken = callbackToken
+	stub.raw = append([]byte(nil), raw...)
+	return domain.WebhookResult{Outcome: "paid", Created: true}, stub.err
+}
+
 func (*paymentServiceStub) GetConfig(context.Context, ids.StoreID) (domain.VietQRConfig, error) {
 	return domain.VietQRConfig{}, application.ErrNotFound
 }
@@ -104,6 +130,48 @@ func TestInstructionDerivesPaymentFromOwnedOrderAndRequiresIdempotency(t *testin
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("instruction response is cacheable")
+	}
+}
+
+func TestMoMoAttemptDerivesPaymentFromOwnedOrder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	storeID, _ := ids.NewStoreID()
+	orderID, _ := ids.NewOrderID()
+	paymentID, _ := ids.NewPaymentID()
+	service := &paymentServiceStub{}
+	momo := &momoServiceStub{}
+	engine := gin.New()
+	subdomain, _ := storesdomain.ParseSubdomain("shop")
+	hosts := tenant.NewHostMiddleware(paymentHostResolver{store: storesapplication.StoreRecord{StoreID: storeID, Subdomain: subdomain, Status: storesdomain.StoreStatusActive, DefaultCurrency: "VND"}}, "example.test", "auth.example.test", slog.New(slog.DiscardHandler), time.Second)
+	handler := NewHandler(service, paymentOrderStub{order: ordersdomain.Order{ID: orderID, Payment: ordersdomain.Payment{ID: paymentID, Provider: domain.ProviderMoMo}}}, paymentAuthenticatorStub{}, func(ctx *gin.Context) { ctx.Next() }, tenant.Middleware{}, permissionStub{}, slog.New(slog.DiscardHandler), time.Second).WithMoMo(momo, 35*time.Second)
+	handler.Register(engine, hosts)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://shop.example.test/api/v1/orders/"+orderID.String()+"/payments/momo/attempts", nil)
+	request.Host = "shop.example.test"
+	request.Header.Set("Authorization", "Bearer order-grant")
+	request.Header.Set("Idempotency-Key", "momo-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || momo.start.StoreID != storeID || momo.start.OrderID != orderID || momo.start.PaymentID != paymentID || momo.start.IdempotencyKey != "momo-key" {
+		t.Fatalf("response = %d, command = %#v", response.Code, momo.start)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("MoMo response is cacheable")
+	}
+}
+
+func TestMoMoWebhookPreservesBoundedRawBodyAndAcknowledgesWithNoContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &paymentServiceStub{}
+	momo := &momoServiceStub{}
+	engine := gin.New()
+	handler := NewHandler(service, paymentOrderStub{}, paymentAuthenticatorStub{}, func(ctx *gin.Context) { ctx.Next() }, tenant.Middleware{}, permissionStub{}, slog.New(slog.DiscardHandler), time.Second).WithMoMo(momo, 35*time.Second)
+	handler.Register(engine, tenant.HostMiddleware{})
+	raw := `{"amount":1000,"signature":"opaque"}`
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/payment-webhooks/momo/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", strings.NewReader(raw))
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || string(momo.raw) != raw || momo.callbackToken == "" {
+		t.Fatalf("response = %d, raw = %q, token = %q", response.Code, momo.raw, momo.callbackToken)
 	}
 }
 

@@ -99,9 +99,11 @@ func cleanupStores(tb testing.TB, pool *pgxpool.Pool, created []Store) {
 		}
 		failed := false
 		for _, statement := range []string{
+			`DELETE FROM payment_webhook_receipts WHERE store_id = $1::uuid`,
 			`DELETE FROM payment_manual_confirmations WHERE store_id = $1::uuid`,
 			`DELETE FROM payment_reconciliation_items WHERE store_id = $1::uuid`,
 			`DELETE FROM payment_attempts WHERE store_id = $1::uuid`,
+			`DELETE FROM payment_callback_routes WHERE store_id = $1::uuid`,
 			`DELETE FROM payment_provider_configs WHERE store_id = $1::uuid`,
 			`DELETE FROM order_guest_grants WHERE store_id = $1::uuid`,
 			`DELETE FROM order_idempotency WHERE store_id = $1::uuid`,

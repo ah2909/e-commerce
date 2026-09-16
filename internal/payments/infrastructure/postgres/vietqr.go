@@ -69,17 +69,18 @@ func NewRepository(db *gorm.DB, cipher Cipher, qr QREncoder, orders PaymentOrder
 }
 
 type providerConfigRow struct {
-	StoreID      string    `gorm:"column:store_id"`
-	Provider     string    `gorm:"column:provider"`
-	BankBIN      string    `gorm:"column:bank_bin"`
-	AccountLast4 string    `gorm:"column:account_last4"`
-	Ciphertext   []byte    `gorm:"column:ciphertext"`
-	Nonce        []byte    `gorm:"column:nonce"`
-	KeyVersion   int       `gorm:"column:key_version"`
-	Enabled      bool      `gorm:"column:enabled"`
-	Version      int64     `gorm:"column:version"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	StoreID          string    `gorm:"column:store_id"`
+	Provider         string    `gorm:"column:provider"`
+	BankBIN          string    `gorm:"column:bank_bin"`
+	AccountLast4     string    `gorm:"column:account_last4"`
+	PublicIdentifier string    `gorm:"column:public_identifier"`
+	Ciphertext       []byte    `gorm:"column:ciphertext"`
+	Nonce            []byte    `gorm:"column:nonce"`
+	KeyVersion       int       `gorm:"column:key_version"`
+	Enabled          bool      `gorm:"column:enabled"`
+	Version          int64     `gorm:"column:version"`
+	CreatedAt        time.Time `gorm:"column:created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at"`
 }
 
 func (providerConfigRow) TableName() string { return "payment_provider_configs" }
@@ -100,6 +101,7 @@ type attemptRow struct {
 	InstructionNonce      []byte    `gorm:"column:instruction_nonce"`
 	InstructionKeyVersion int       `gorm:"column:instruction_key_version"`
 	State                 string    `gorm:"column:state"`
+	ProviderResultCode    *int      `gorm:"column:provider_result_code"`
 	ExpiresAt             time.Time `gorm:"column:expires_at"`
 	CreatedAt             time.Time `gorm:"column:created_at"`
 	UpdatedAt             time.Time `gorm:"column:updated_at"`
@@ -189,7 +191,7 @@ func (repository *Repository) ReplaceConfig(ctx context.Context, storeID ids.Sto
 		if err != nil {
 			return err
 		}
-		envelope, err := repository.cipher.Encrypt(plaintext, configAAD(storeID, version))
+		envelope, err := repository.cipher.Encrypt(plaintext, configAAD(storeID, domain.ProviderVietQR, version))
 		if err != nil {
 			return application.ErrDependency
 		}
@@ -276,7 +278,7 @@ func (repository *Repository) CreateInstruction(ctx context.Context, command app
 		if err != nil {
 			return err
 		}
-		envelope, err := repository.cipher.Encrypt(snapshot, attemptAAD(command.StoreID, attemptID))
+		envelope, err := repository.cipher.Encrypt(snapshot, attemptAAD(command.StoreID, domain.ProviderVietQR, attemptID))
 		if err != nil {
 			return application.ErrDependency
 		}
@@ -490,7 +492,7 @@ func (repository *Repository) mapConfig(row providerConfigRow) (domain.VietQRCon
 }
 
 func (repository *Repository) decryptConfig(row providerConfigRow) (configSecret, error) {
-	plaintext, err := repository.cipher.Decrypt(secret.Envelope{Ciphertext: row.Ciphertext, Nonce: row.Nonce, KeyVersion: row.KeyVersion}, configAAD(ids.StoreID(row.StoreID), row.Version))
+	plaintext, err := repository.cipher.Decrypt(secret.Envelope{Ciphertext: row.Ciphertext, Nonce: row.Nonce, KeyVersion: row.KeyVersion}, configAAD(ids.StoreID(row.StoreID), domain.ProviderVietQR, row.Version))
 	if err != nil {
 		return configSecret{}, application.ErrDependency
 	}
@@ -508,7 +510,7 @@ func (repository *Repository) decryptConfig(row providerConfigRow) (configSecret
 }
 
 func (repository *Repository) mapInstruction(row attemptRow, created bool) (domain.Instruction, error) {
-	plaintext, err := repository.cipher.Decrypt(secret.Envelope{Ciphertext: row.InstructionCiphertext, Nonce: row.InstructionNonce, KeyVersion: row.InstructionKeyVersion}, attemptAAD(ids.StoreID(row.StoreID), ids.PaymentAttemptID(row.AttemptID)))
+	plaintext, err := repository.cipher.Decrypt(secret.Envelope{Ciphertext: row.InstructionCiphertext, Nonce: row.InstructionNonce, KeyVersion: row.InstructionKeyVersion}, attemptAAD(ids.StoreID(row.StoreID), domain.ProviderVietQR, ids.PaymentAttemptID(row.AttemptID)))
 	if err != nil {
 		return domain.Instruction{}, application.ErrDependency
 	}
@@ -558,12 +560,12 @@ func (repository *Repository) appendEvent(ctx context.Context, tx *gorm.DB, stor
 	return repository.events.Append(ctx, tx, event)
 }
 
-func configAAD(storeID ids.StoreID, version int64) []byte {
-	return []byte(fmt.Sprintf("%s|vietqr|%d", storeID.String(), version))
+func configAAD(storeID ids.StoreID, provider string, version int64) []byte {
+	return []byte(fmt.Sprintf("%s|%s|%d", storeID.String(), provider, version))
 }
 
-func attemptAAD(storeID ids.StoreID, attemptID ids.PaymentAttemptID) []byte {
-	return []byte(storeID.String() + "|vietqr-attempt|" + attemptID.String())
+func attemptAAD(storeID ids.StoreID, provider string, attemptID ids.PaymentAttemptID) []byte {
+	return []byte(storeID.String() + "|" + provider + "-attempt|" + attemptID.String())
 }
 
 func advisoryLock(tx *gorm.DB, value string) error {

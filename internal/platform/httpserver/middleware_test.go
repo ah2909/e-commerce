@@ -98,6 +98,18 @@ func TestGinEngineMapsUnknownRouteAndMethod(t *testing.T) {
 	}
 }
 
+func TestGinEngineLogsRouteTemplateWithoutParameters(t *testing.T) {
+	var output bytes.Buffer
+	engine := NewEngine(slog.New(slog.NewJSONHandler(&output, nil)))
+	engine.POST("/callbacks/:token", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })
+	secretToken := "secret-callback-token"
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/callbacks/"+secretToken, nil))
+	if response.Code != http.StatusNoContent || strings.Contains(output.String(), secretToken) || !strings.Contains(output.String(), "/callbacks/:token") {
+		t.Fatalf("response = %d, log = %q", response.Code, output.String())
+	}
+}
+
 func TestGinEngineDoesNotRedirectSlashMismatches(t *testing.T) {
 	engine := NewEngine(slog.New(slog.DiscardHandler))
 	engine.GET("/tenant", func(ctx *gin.Context) { ctx.Status(http.StatusNoContent) })

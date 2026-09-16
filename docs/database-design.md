@@ -183,7 +183,7 @@ Webhook processing inserts or claims the receipt and applies the business effect
 
 Provider configuration ciphertext contains algorithm, nonce, ciphertext, and key version in bounded binary/text columns. The encryption master or wrapping key remains outside PostgreSQL.
 
-Migration 8 implements versioned encrypted VietQR configuration, encrypted attempt snapshots, idempotent manual confirmations, reconciliation items, and versioned explicit staff payment permissions. MoMo webhook receipts and refunds remain target-schema work.
+Migration 8 implements versioned encrypted VietQR configuration, encrypted attempt snapshots, idempotent manual confirmations, reconciliation items, and versioned explicit staff payment permissions. Migration 9 generalizes the provider constraints for MoMo, adds opaque callback routing, and persists deduplicated signed webhook receipts. Refunds remain target-schema work.
 
 ### Shipping
 

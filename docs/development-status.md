@@ -25,6 +25,8 @@ Accepted [task 013](../tasks/archive/013-checkout-orders.md) implements atomic u
 
 Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypted tenant VietQR configuration, local dynamic QR instructions, idempotent audited manual confirmation, atomic order/inventory settlement, explicit staff payment permissions, and tenant-scoped reconciliation. Both independent reviews and final verification passed.
 
+[Task 015](../tasks/015-momo-payments.md) implements encrypted tenant MoMo configuration, bounded signed provider requests, idempotent attempts, raw-body signed IPNs, atomic automatic settlement, and reconciliation. Independent architecture/security reviews and the complete automated verification gate pass; live MoMo sandbox acceptance remains pending external credentials and a reachable HTTPS callback.
+
 ## Status meanings
 
 | Status | Meaning |
@@ -49,7 +51,7 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 | Customers and carts | Implemented and accepted | Accepted [task 012](../tasks/archive/012-customers-and-carts.md) adds migration 6, user-owned profiles and saved addresses, user/guest carts, current Catalog/Pricing/Inventory projections, schema-gated APIs, and bounded expiry. |
 | Checkout and orders | Implemented and accepted | Accepted task 013 adds migration 7, the atomic checkout coordinator, immutable snapshots, central lifecycle policy, tenant idempotency, guest grants, order reads, and order-first expiry. |
 | VietQR payments | Implemented and accepted | Accepted task 014 adds encrypted provider configuration, local QR instructions, audited manual confirmation, atomic settlement, staff payment permissions, and reconciliation. |
-| MoMo payments | Not started | No provider adapter, signed webhook, attempt, receipt, or automatic confirmation implementation exists. |
+| MoMo payments | Implemented, changes required | Task 015 passed independent reviews and complete automated verification; live sandbox initiation and signed callback delivery remain required before acceptance. |
 | Cancellation and refunds | Not started | No order cancellation or full-refund workflow exists. |
 | Shipping and fulfillment | Partially implemented | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Shipment, carrier, tracking, and fulfillment transitions remain unimplemented. |
 | Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
@@ -105,7 +107,13 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 - audited, idempotent manual confirmation receipts and tenant-scoped unresolved reconciliation items
 - versioned explicit staff grants for payment confirmation and reconciliation viewing
 
-The schema intentionally does not include platform operators. It also does not include post-MVP coupons, MoMo webhook receipts, Refunds, shipments, or inbox tables.
+### Migration 00009
+
+- MoMo-capable provider configuration and payment-attempt constraints with encrypted historical credential snapshots
+- opaque callback-route resolution and raw-body-digest webhook receipt deduplication
+- provider result-code capture with tenant and provider binding constraints
+
+The schema intentionally does not include platform operators. It also does not include post-MVP coupons, Refunds, shipments, or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -129,11 +137,11 @@ These positives do not waive the blockers above.
 
 ## Public API status
 
-[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, Shipping-rule, Checkout, Order, VietQR payment, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
+[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, Shipping-rule, Checkout, Order, VietQR, MoMo, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`.
 
-Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, and foreign customer/cart/order/payment data are not public. Post-MVP coupons, MoMo execution, refunds, fulfillment, and event-administration endpoints remain absent.
+Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Task 015 adds redacted MoMo configuration, shopper attempts, and the public signed-IPN route. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, callback routing data, and foreign customer/cart/order/payment data are not public. Post-MVP coupons, refunds, fulfillment, and event-administration endpoints remain absent.
 
 ## Verification evidence
 

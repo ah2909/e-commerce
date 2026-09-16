@@ -40,6 +40,10 @@ func TestLoadFrom(t *testing.T) {
 	values["CART_EXPIRY_POLL"] = "3m"
 	values["PAYMENT_CONFIG_KEYS"] = "3:" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x24}, 32))
 	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "3"
+	values["MOMO_API_BASE_URL"] = "https://test-payment.momo.vn"
+	values["MOMO_REDIRECT_URL"] = "https://shop.example.test/payments/momo/return"
+	values["MOMO_PUBLIC_URL"] = "https://payments.example.test"
+	values["MOMO_REQUEST_TIMEOUT"] = "40s"
 
 	got, err := LoadFrom(mapLookup(values))
 	if err != nil {
@@ -84,6 +88,9 @@ func TestLoadFrom(t *testing.T) {
 	if got.PaymentConfigActiveVersion != 3 || got.PaymentConfigKeys[3] != [32]byte(bytes.Repeat([]byte{0x24}, 32)) {
 		t.Fatalf("LoadFrom() payment keyring mismatch")
 	}
+	if got.MoMoAPIBaseURL != "https://test-payment.momo.vn" || got.MoMoPublicURL != "https://payments.example.test" || got.MoMoRequestTimeout != 40*time.Second {
+		t.Fatalf("LoadFrom() MoMo fields = %#v", got)
+	}
 }
 
 func TestLoadFromDefaults(t *testing.T) {
@@ -111,6 +118,9 @@ func TestLoadFromDefaults(t *testing.T) {
 	}
 	if got.CartExpiryBatch != 50 || got.CartExpiryPoll != defaultCartExpiryPoll {
 		t.Fatalf("LoadFrom() cart worker defaults = %#v", got)
+	}
+	if got.MoMoAPIBaseURL != "https://test-payment.momo.vn" || got.MoMoRequestTimeout != defaultMoMoRequestTimeout {
+		t.Fatalf("LoadFrom() MoMo defaults = %#v", got)
 	}
 }
 
@@ -154,6 +164,10 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "large inventory batch", key: "INVENTORY_EXPIRY_BATCH", value: "101", want: "INVENTORY_EXPIRY_BATCH"},
 		{name: "large inventory poll", key: "INVENTORY_EXPIRY_POLL", value: "61s", want: "INVENTORY_EXPIRY_POLL"},
 		{name: "payment keys without active version", key: "PAYMENT_CONFIG_KEYS", value: "1:" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), want: "configured together"},
+		{name: "untrusted MoMo API", key: "MOMO_API_BASE_URL", value: "https://evil.example", want: "MOMO_API_BASE_URL"},
+		{name: "MoMo API port", key: "MOMO_API_BASE_URL", value: "https://test-payment.momo.vn:8443", want: "MOMO_API_BASE_URL"},
+		{name: "insecure MoMo public URL", key: "MOMO_PUBLIC_URL", value: "http://payments.example.test", want: "MOMO_PUBLIC_URL"},
+		{name: "short MoMo timeout", key: "MOMO_REQUEST_TIMEOUT", value: "29s", want: "MOMO_REQUEST_TIMEOUT"},
 	}
 
 	for _, test := range tests {
@@ -188,6 +202,16 @@ func TestLoadFromProductionRejectsDevelopmentPaymentKey(t *testing.T) {
 	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "1"
 	_, err := LoadFrom(mapLookup(values))
 	if err == nil || !strings.Contains(err.Error(), "development key") {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+}
+
+func TestLoadFromProductionRejectsMoMoSandbox(t *testing.T) {
+	values := validEnvironment()
+	values["APP_ENV"] = "production"
+	values["MOMO_API_BASE_URL"] = "https://test-payment.momo.vn"
+	_, err := LoadFrom(mapLookup(values))
+	if err == nil || !strings.Contains(err.Error(), "production MoMo origin") {
 		t.Fatalf("LoadFrom() error = %v", err)
 	}
 }

@@ -23,3 +23,31 @@ func TestValidateVietQRConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateMoMoConfigAndRedaction(t *testing.T) {
+	value, err := ValidateMoMoConfig(MoMoConfigDraft{PartnerCode: " MOMOTESTPARTNER ", AccessKey: " access-key-123 ", SecretKey: " secret-key-123456789 ", Enabled: true})
+	if err != nil || value.PartnerCode != "MOMOTESTPARTNER" || MaskPartnerCode(value.PartnerCode) != "MO***********ER" {
+		t.Fatalf("ValidateMoMoConfig() = %#v, %v", value, err)
+	}
+	for _, invalid := range []MoMoConfigDraft{
+		{PartnerCode: "x", AccessKey: "access-key", SecretKey: "secret-key-123456"},
+		{PartnerCode: "partner", AccessKey: "short", SecretKey: "secret-key-123456"},
+		{PartnerCode: "partner", AccessKey: "access-key", SecretKey: "short"},
+		{PartnerCode: "par\ntner", AccessKey: "access-key", SecretKey: "secret-key-123456"},
+	} {
+		if _, err := ValidateMoMoConfig(invalid); err == nil {
+			t.Fatalf("ValidateMoMoConfig(%#v) accepted invalid input", invalid)
+		}
+	}
+}
+
+func TestValidActionURLRestrictsProviderOrigin(t *testing.T) {
+	if !ValidActionURL("https://test-payment.momo.vn/v2/gateway/pay?t=x", true) {
+		t.Fatal("ValidActionURL() rejected sandbox URL")
+	}
+	for _, value := range []string{"http://test-payment.momo.vn/pay", "https://evil.example/pay", "https://payment.momo.vn/pay"} {
+		if ValidActionURL(value, true) {
+			t.Fatalf("ValidActionURL(%q) accepted unsafe URL", value)
+		}
+	}
+}

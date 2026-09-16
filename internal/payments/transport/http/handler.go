@@ -34,6 +34,13 @@ type Service interface {
 	ListReconciliation(context.Context, ids.StoreID, int, time.Time, ids.ReconciliationID) ([]domain.Reconciliation, error)
 }
 
+type MoMoService interface {
+	GetMoMoConfig(context.Context, ids.StoreID) (domain.MoMoConfig, error)
+	ReplaceMoMoConfig(context.Context, ids.StoreID, ids.UserID, string, int64, domain.MoMoConfigDraft) (domain.MoMoConfig, error)
+	StartMoMo(context.Context, application.InstructionCommand) (domain.MoMoAttempt, error)
+	HandleMoMoIPN(context.Context, string, []byte, string) (domain.WebhookResult, error)
+}
+
 type OrderReader interface {
 	GetForUser(context.Context, ids.StoreID, ids.OrderID, ids.UserID) (ordersdomain.Order, error)
 	GetForGrant(context.Context, ids.StoreID, ids.OrderID, string) (ordersdomain.Order, error)
@@ -56,6 +63,14 @@ type Handler struct {
 	permissions   PermissionChecker
 	logger        *slog.Logger
 	timeout       time.Duration
+	momo          MoMoService
+	momoTimeout   time.Duration
+}
+
+func (handler Handler) WithMoMo(service MoMoService, timeout time.Duration) Handler {
+	handler.momo = service
+	handler.momoTimeout = timeout
+	return handler
 }
 
 func NewHandler(service Service, orders OrderReader, authenticator UserAuthenticator, authenticate gin.HandlerFunc, tenantMiddleware tenant.Middleware, permissions PermissionChecker, logger *slog.Logger, timeout time.Duration) Handler {
@@ -71,6 +86,49 @@ func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware)
 	workforce := []gin.HandlerFunc{hosts.TenantGin(), handler.withTimeout(), handler.authenticate, handler.tenant.Gin()}
 	router.POST("/api/v1/admin/payments/:payment_id/vietqr-confirmations", append(workforce, handler.require(storesdomain.PermissionPaymentConfirm), handler.confirm)...)
 	router.GET("/api/v1/admin/payment-reconciliation-items", append(workforce, handler.require(storesdomain.PermissionPaymentReconcile), handler.listReconciliation)...)
+	if handler.momo != nil {
+		router.GET("/api/v1/admin/payment-providers/momo", append(config, handler.getMoMoConfig)...)
+		router.HEAD("/api/v1/admin/payment-providers/momo", append(config, handler.getMoMoConfig)...)
+		router.PUT("/api/v1/admin/payment-providers/momo", append(config, handler.replaceMoMoConfig)...)
+		router.POST("/api/v1/orders/:order_id/payments/momo/attempts", hosts.TenantGin(), handler.withMoMoTimeout(), handler.startMoMo)
+		router.POST("/api/v1/payment-webhooks/momo/:callback_token", handler.withTimeout(), handler.handleMoMoIPN)
+	}
+}
+
+func (handler Handler) getMoMoConfig(ctx *gin.Context) {
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	value, err := handler.momo.GetMoMoConfig(ctx.Request.Context(), resolved.StoreID())
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	if ctx.Request.Method == http.MethodHead {
+		ctx.Status(http.StatusOK)
+		return
+	}
+	ctx.JSON(http.StatusOK, value)
+}
+
+func (handler Handler) replaceMoMoConfig(ctx *gin.Context) {
+	var body struct {
+		ExpectedVersion int64  `json:"expected_version"`
+		Enabled         bool   `json:"enabled"`
+		PartnerCode     string `json:"partner_code"`
+		AccessKey       string `json:"access_key"`
+		SecretKey       string `json:"secret_key"`
+	}
+	if !decode(ctx, &body) {
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	value, err := handler.momo.ReplaceMoMoConfig(ctx.Request.Context(), resolved.StoreID(), resolved.UserID(), httpserver.RequestID(ctx.Request.Context()), body.ExpectedVersion, domain.MoMoConfigDraft{PartnerCode: body.PartnerCode, AccessKey: body.AccessKey, SecretKey: body.SecretKey, Enabled: body.Enabled})
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, value)
 }
 
 func (handler Handler) getConfig(ctx *gin.Context) {
@@ -139,6 +197,61 @@ func (handler Handler) createInstruction(ctx *gin.Context) {
 	}
 	ctx.Header("Cache-Control", "no-store")
 	ctx.JSON(status, value)
+}
+
+func (handler Handler) startMoMo(ctx *gin.Context) {
+	store, ok := tenant.StoreFromContext(ctx.Request.Context())
+	orderID, err := ids.ParseOrderID(ctx.Param("order_id"))
+	token, hasToken := bearer(ctx.Request)
+	if !ok || err != nil || !hasToken {
+		handler.notFound(ctx)
+		return
+	}
+	user, _, authErr := handler.authenticator.AuthenticateUser(ctx.Request.Context(), store.StoreID, token)
+	var order ordersdomain.Order
+	if authErr == nil {
+		order, err = handler.orders.GetForUser(ctx.Request.Context(), store.StoreID, orderID, user.ID)
+	} else {
+		order, err = handler.orders.GetForGrant(ctx.Request.Context(), store.StoreID, orderID, token)
+	}
+	if err != nil || order.Payment.Provider != domain.ProviderMoMo {
+		handler.notFound(ctx)
+		return
+	}
+	value, err := handler.momo.StartMoMo(ctx.Request.Context(), application.InstructionCommand{StoreID: store.StoreID, OrderID: orderID, PaymentID: order.Payment.ID, IdempotencyKey: idempotencyKey(ctx.Request), CorrelationID: httpserver.RequestID(ctx.Request.Context())})
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	status := http.StatusOK
+	if value.Created {
+		status = http.StatusCreated
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(status, value)
+}
+
+func (handler Handler) handleMoMoIPN(ctx *gin.Context) {
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 16<<10)
+	raw, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		problem.Write(ctx.Writer, ctx.Request, http.StatusBadRequest, "invalid_payment_notification", "Payment notification is invalid.", nil)
+		return
+	}
+	_, err = handler.momo.HandleMoMoIPN(ctx.Request.Context(), ctx.Param("callback_token"), raw, httpserver.RequestID(ctx.Request.Context()))
+	if err != nil {
+		if errors.Is(err, application.ErrDependency) || retryable(err) {
+			problem.Write(ctx.Writer, ctx.Request, http.StatusServiceUnavailable, "dependency_unavailable", "A required dependency is unavailable.", map[string]any{"retryable": true})
+			return
+		}
+		if errors.Is(err, application.ErrConflict) {
+			problem.Write(ctx.Writer, ctx.Request, http.StatusConflict, "payment_notification_conflict", "Payment notification conflicts with the recorded result.", nil)
+			return
+		}
+		problem.Write(ctx.Writer, ctx.Request, http.StatusBadRequest, "invalid_payment_notification", "Payment notification is invalid.", nil)
+		return
+	}
+	ctx.Status(http.StatusNoContent)
 }
 
 func (handler Handler) confirm(ctx *gin.Context) {
@@ -258,6 +371,15 @@ func (handler Handler) notFound(ctx *gin.Context) {
 func (handler Handler) withTimeout() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		requestCtx, cancel := context.WithTimeout(ctx.Request.Context(), handler.timeout)
+		defer cancel()
+		ctx.Request = ctx.Request.WithContext(requestCtx)
+		ctx.Next()
+	}
+}
+
+func (handler Handler) withMoMoTimeout() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		requestCtx, cancel := context.WithTimeout(ctx.Request.Context(), handler.momoTimeout+5*time.Second)
 		defer cancel()
 		ctx.Request = ctx.Request.WithContext(requestCtx)
 		ctx.Next()

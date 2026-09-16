@@ -115,7 +115,11 @@ func ginRequestMiddleware(logger *slog.Logger) gin.HandlerFunc {
 				}
 				ctx.Abort()
 			}
-			logger.Info("request completed", "request_id", requestID, "method", ctx.Request.Method, "path", ctx.Request.URL.Path, "status", ctx.Writer.Status(), "duration_ms", time.Since(started).Milliseconds())
+			path := ctx.FullPath()
+			if path == "" {
+				path = "<unmatched>"
+			}
+			logger.Info("request completed", "request_id", requestID, "method", ctx.Request.Method, "path", path, "status", ctx.Writer.Status(), "duration_ms", time.Since(started).Milliseconds())
 		}()
 		ctx.Next()
 	}

@@ -39,6 +39,7 @@ import (
 	orderspostgres "github.com/ah2909/e-commerce/internal/orders/infrastructure/postgres"
 	ordershttp "github.com/ah2909/e-commerce/internal/orders/transport/http"
 	paymentsapplication "github.com/ah2909/e-commerce/internal/payments/application"
+	paymentmomo "github.com/ah2909/e-commerce/internal/payments/infrastructure/momo"
 	paymentspostgres "github.com/ah2909/e-commerce/internal/payments/infrastructure/postgres"
 	paymentsecret "github.com/ah2909/e-commerce/internal/payments/infrastructure/secret"
 	paymentvietqr "github.com/ah2909/e-commerce/internal/payments/infrastructure/vietqr"
@@ -211,7 +212,16 @@ func run() error {
 					}
 					paymentRepository := paymentspostgres.NewRepository(connection.GORM, keyring, paymentvietqr.Encoder{}, orderRepository, inventoryRepository, auditpostgres.NewWriter(), eventingpostgres.NewWriter(), storeRepository)
 					paymentService := paymentsapplication.NewService(paymentRepository)
-					paymentshttp.NewHandler(paymentService, orderService, identityService, identityHandler.AuthenticateUser(), tenantMiddleware, storeRepository, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+					paymentHandler := paymentshttp.NewHandler(paymentService, orderService, identityService, identityHandler.AuthenticateUser(), tenantMiddleware, storeRepository, logger, cfg.DependencyTimeout)
+					if momoAvailable(schemaVersion) {
+						momoClient, err := paymentmomo.NewClient(paymentmomo.NewHTTPClient(cfg.MoMoRequestTimeout), cfg.MoMoAPIBaseURL, cfg.MoMoRedirectURL, cfg.MoMoPublicURL)
+						if err != nil {
+							return fmt.Errorf("initialize MoMo adapter: %w", err)
+						}
+						configuredPayments := paymentService.WithMoMo(paymentRepository, momoClient)
+						paymentHandler = paymentHandler.WithMoMo(configuredPayments, cfg.MoMoRequestTimeout)
+					}
+					paymentHandler.Register(engine, hostMiddleware)
 				}
 			}
 		}
@@ -224,7 +234,7 @@ func run() error {
 		Handler:           engine,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      apiWriteTimeout(cfg.DependencyTimeout),
+		WriteTimeout:      apiWriteTimeout(max(cfg.DependencyTimeout, cfg.MoMoRequestTimeout)),
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -247,6 +257,7 @@ func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
 func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
 func ordersAvailable(schemaVersion int64) bool    { return schemaVersion >= 7 }
 func paymentsAvailable(schemaVersion int64) bool  { return schemaVersion >= 8 }
+func momoAvailable(schemaVersion int64) bool      { return schemaVersion >= 9 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

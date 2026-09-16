@@ -40,6 +40,8 @@ const (
 	maxInventoryExpiryPoll         = time.Minute
 	defaultCartExpiryPoll          = time.Minute
 	maxCartExpiryPoll              = 15 * time.Minute
+	defaultMoMoRequestTimeout      = 35 * time.Second
+	maxMoMoRequestTimeout          = 60 * time.Second
 )
 
 type RateLimit struct {
@@ -93,6 +95,10 @@ type Config struct {
 	CartExpiryPoll             time.Duration
 	PaymentConfigKeys          map[int][32]byte
 	PaymentConfigActiveVersion int
+	MoMoAPIBaseURL             string
+	MoMoRedirectURL            string
+	MoMoPublicURL              string
+	MoMoRequestTimeout         time.Duration
 }
 
 type LookupFunc func(string) (string, bool)
@@ -245,6 +251,16 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	momoAPIBaseURL := optional(lookup, "MOMO_API_BASE_URL", momoDefaultAPI(appEnv))
+	momoRedirectURL := optional(lookup, "MOMO_REDIRECT_URL", "https://"+tenantBaseDomain+"/payments/momo/return")
+	momoPublicURL := optional(lookup, "MOMO_PUBLIC_URL", "https://"+tenantBaseDomain)
+	momoRequestTimeout, err := duration(lookup, "MOMO_REQUEST_TIMEOUT", defaultMoMoRequestTimeout, maxMoMoRequestTimeout)
+	if err != nil || momoRequestTimeout < 30*time.Second {
+		return Config{}, fmt.Errorf("MOMO_REQUEST_TIMEOUT must be between 30s and %s", maxMoMoRequestTimeout)
+	}
+	if err := validateMoMoURLs(appEnv, momoAPIBaseURL, momoRedirectURL, momoPublicURL); err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
@@ -286,7 +302,38 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		CartExpiryPoll:             cartExpiryPoll,
 		PaymentConfigKeys:          paymentKeys,
 		PaymentConfigActiveVersion: activePaymentKey,
+		MoMoAPIBaseURL:             momoAPIBaseURL,
+		MoMoRedirectURL:            momoRedirectURL,
+		MoMoPublicURL:              momoPublicURL,
+		MoMoRequestTimeout:         momoRequestTimeout,
 	}, nil
+}
+
+func momoDefaultAPI(appEnv string) string {
+	if appEnv == "production" {
+		return "https://payment.momo.vn"
+	}
+	return "https://test-payment.momo.vn"
+}
+
+func validateMoMoURLs(appEnv, apiBase, redirect, public string) error {
+	api, err := url.Parse(apiBase)
+	if err != nil || api.Scheme != "https" || api.User != nil || api.Port() != "" || api.RawQuery != "" || api.Fragment != "" || api.Path != "" || (api.Hostname() != "test-payment.momo.vn" && api.Hostname() != "payment.momo.vn") {
+		return fmt.Errorf("MOMO_API_BASE_URL must be an exact supported MoMo HTTPS origin")
+	}
+	if appEnv == "production" && api.Hostname() != "payment.momo.vn" {
+		return fmt.Errorf("MOMO_API_BASE_URL must use the production MoMo origin in production")
+	}
+	for name, value := range map[string]string{"MOMO_REDIRECT_URL": redirect, "MOMO_PUBLIC_URL": public} {
+		parsed, parseErr := url.Parse(value)
+		if parseErr != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || len(value) > 2048 {
+			return fmt.Errorf("%s must be an HTTPS URL", name)
+		}
+		if name == "MOMO_PUBLIC_URL" && (parsed.RawQuery != "" || parsed.Fragment != "") {
+			return fmt.Errorf("MOMO_PUBLIC_URL must not contain a query or fragment")
+		}
+	}
+	return nil
 }
 
 func validateTenantHosts(baseDomain, authHost string) error {

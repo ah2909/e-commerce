@@ -14,6 +14,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 | Task | State | Next gate |
 | --- | --- | --- |
+| [015 MoMo payments](015-momo-payments.md) | Reviews and automated verification passed; live sandbox UAT blocked on external prerequisites | `make test-momo-sandbox` |
 | [013 Checkout and orders](archive/013-checkout-orders.md) | Implemented and accepted; both reviews and final verification passed | None |
 | [004 Identity and authorization](004-identity-authorization.md) | Revision 5 verified for continued development; two medium findings explicitly skipped and task inactive | None scheduled; reopen with `$ec-fix` only if the risk decision changes |
 | [005 Documentation and status standardization](005-correct-system-design-documentation.md) | Reviews passed and user accepted; final verification explicitly skipped, task inactive | Reopen with `$ec-test` only if verification evidence is required |

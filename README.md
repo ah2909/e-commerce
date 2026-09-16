@@ -84,9 +84,10 @@ Important boundaries:
 - `INVENTORY_EXPIRY_BATCH` and `INVENTORY_EXPIRY_POLL` bound reservation-expiry work after migration 5.
 - `CART_EXPIRY_BATCH` and `CART_EXPIRY_POLL` bound inactive-cart expiry work after migration 6.
 - `PAYMENT_CONFIG_KEYS` is a comma-separated versioned AES-256 keyring and `PAYMENT_CONFIG_ACTIVE_KEY_VERSION` selects the write key; the checked-in value is development-only.
+- `MOMO_API_BASE_URL` is restricted to MoMo's official production or sandbox origin. `MOMO_PUBLIC_URL` must be the public HTTPS API origin used for signed IPNs, and `MOMO_REDIRECT_URL` is the browser return target.
 - Google or Facebook login remains disabled unless its complete provider configuration is present and valid.
 - Provider, database, Redis, and token configuration must come from deployment secrets/configuration, never committed production values.
-- Store-owned VietQR beneficiary details are encrypted at rest and API reads expose only a masked account number. MoMo secrets and execution remain unimplemented.
+- Store-owned VietQR beneficiary details and MoMo credentials are encrypted at rest. API reads expose only masked public identifiers and never return payment secrets.
 
 The public contract currently implemented is [api/openapi.json](api/openapi.json).
 
@@ -105,6 +106,16 @@ Integration tests use a separately guarded test database:
 make migrate-test-up
 make test-integration
 ```
+
+Live MoMo acceptance uses an isolated test order, the MoMo Test app, a publicly reachable HTTPS API, and sandbox merchant credentials. Set the `MOMO_SANDBOX_*` variables consumed by `cmd/momo-sandbox`, then run:
+
+```bash
+make test-momo-sandbox
+```
+
+The runner configures the sandbox merchant through the API, creates the attempt, waits for the signed IPN, and verifies the resulting payment, order, reservation, ledger, and webhook receipt in the guarded test database. Keep credentials in the process environment or a secret manager; do not commit them.
+
+Required inputs are `MOMO_SANDBOX_APP_URL`, `MOMO_SANDBOX_STORE_HOST`, `MOMO_SANDBOX_STORE_ID`, `MOMO_SANDBOX_ORDER_ID`, `MOMO_SANDBOX_OWNER_TOKEN`, `MOMO_SANDBOX_SHOPPER_TOKEN`, `MOMO_SANDBOX_PARTNER_CODE`, `MOMO_SANDBOX_ACCESS_KEY`, `MOMO_SANDBOX_SECRET_KEY`, and `MOMO_SANDBOX_DATABASE_URL`. The API must run with `MOMO_API_BASE_URL=https://test-payment.momo.vn`, a `MOMO_PUBLIC_URL` reachable by MoMo over HTTPS, and an active reservation on the pending MoMo test order. `MOMO_SANDBOX_CONFIG_VERSION` is optional when replacing an existing configuration.
 
 ## Verification
 
