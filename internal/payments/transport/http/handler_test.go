@@ -11,6 +11,7 @@ import (
 	"time"
 
 	identityapplication "github.com/ah2909/e-commerce/internal/identity/application"
+	ordersapplication "github.com/ah2909/e-commerce/internal/orders/application"
 	ordersdomain "github.com/ah2909/e-commerce/internal/orders/domain"
 	"github.com/ah2909/e-commerce/internal/payments/application"
 	"github.com/ah2909/e-commerce/internal/payments/domain"
@@ -32,6 +33,13 @@ type momoServiceStub struct {
 	callbackToken string
 	raw           []byte
 	err           error
+	refundStore   ids.StoreID
+	refundID      ids.RefundID
+	refundActor   ids.UserID
+	refundKey     string
+	settleRef     string
+	settledAt     time.Time
+	refundErr     error
 }
 
 func (*momoServiceStub) GetMoMoConfig(context.Context, ids.StoreID) (domain.MoMoConfig, error) {
@@ -53,6 +61,21 @@ func (stub *momoServiceStub) HandleMoMoIPN(_ context.Context, callbackToken stri
 	return domain.WebhookResult{Outcome: "paid", Created: true}, stub.err
 }
 
+func (stub *momoServiceStub) GetRefund(_ context.Context, storeID ids.StoreID, refundID ids.RefundID) (domain.Refund, error) {
+	stub.refundStore, stub.refundID = storeID, refundID
+	return domain.Refund{ID: refundID, State: "pending"}, stub.refundErr
+}
+
+func (stub *momoServiceStub) ExecuteMoMoRefund(_ context.Context, storeID ids.StoreID, refundID ids.RefundID, actorID ids.UserID, key string) (domain.Refund, error) {
+	stub.refundStore, stub.refundID, stub.refundActor, stub.refundKey = storeID, refundID, actorID, key
+	return domain.Refund{ID: refundID, State: "succeeded"}, stub.refundErr
+}
+
+func (stub *momoServiceStub) SettleVietQRRefund(_ context.Context, storeID ids.StoreID, refundID ids.RefundID, actorID ids.UserID, key, reference string, settledAt time.Time, _ string) (domain.Refund, error) {
+	stub.refundStore, stub.refundID, stub.refundActor, stub.refundKey, stub.settleRef, stub.settledAt = storeID, refundID, actorID, key, reference, settledAt
+	return domain.Refund{ID: refundID, State: "succeeded", ExternalReference: reference}, stub.refundErr
+}
+
 func (*paymentServiceStub) GetConfig(context.Context, ids.StoreID) (domain.VietQRConfig, error) {
 	return domain.VietQRConfig{}, application.ErrNotFound
 }
@@ -71,13 +94,23 @@ func (*paymentServiceStub) ListReconciliation(context.Context, ids.StoreID, int,
 	return nil, nil
 }
 
-type paymentOrderStub struct{ order ordersdomain.Order }
+type paymentOrderStub struct {
+	order     ordersdomain.Order
+	cancelled *ordersapplication.CancellationCommand
+	cancelErr error
+}
 
 func (stub paymentOrderStub) GetForUser(context.Context, ids.StoreID, ids.OrderID, ids.UserID) (ordersdomain.Order, error) {
 	return stub.order, nil
 }
 func (stub paymentOrderStub) GetForGrant(context.Context, ids.StoreID, ids.OrderID, string) (ordersdomain.Order, error) {
 	return stub.order, nil
+}
+func (stub paymentOrderStub) Cancel(_ context.Context, command ordersapplication.CancellationCommand) (ordersapplication.CancellationResult, error) {
+	if stub.cancelled != nil {
+		*stub.cancelled = command
+	}
+	return ordersapplication.CancellationResult{OrderID: command.OrderID, State: ordersdomain.StateRefundPending, RefundID: ids.RefundID("55555555-5555-4555-8555-555555555555"), Created: true}, stub.cancelErr
 }
 
 type paymentAuthenticatorStub struct{}
@@ -219,6 +252,95 @@ func TestPrivilegedPaymentRoutesEnforceWorkforceScopeAndExplicitPermission(t *te
 			}
 		})
 	}
+}
+
+func TestCancellationAndRefundRoutesBindTenantActorAndRemainNoStore(t *testing.T) {
+	storeID, _ := ids.NewStoreID()
+	userID, _ := ids.NewUserID()
+	orderID, _ := ids.NewOrderID()
+	refundID, _ := ids.NewRefundID()
+	var cancellation ordersapplication.CancellationCommand
+	momo := &momoServiceStub{}
+	engine := refundEngine(storeID, storeID, userID, storesdomain.RoleOwner, true, paymentOrderStub{cancelled: &cancellation}, momo)
+	settledAt := "2026-09-17T10:00:00Z"
+	for _, test := range []struct {
+		name, method, path, body string
+		want                     int
+	}{{"cancel", http.MethodPost, "/api/v1/admin/orders/" + orderID.String() + "/cancellations", `{"reason":"Customer request"}`, http.StatusCreated}, {"get refund", http.MethodGet, "/api/v1/admin/refunds/" + refundID.String(), "", http.StatusOK}, {"execute refund", http.MethodPost, "/api/v1/admin/refunds/" + refundID.String() + "/momo-executions", "", http.StatusOK}, {"settle refund", http.MethodPost, "/api/v1/admin/refunds/" + refundID.String() + "/vietqr-settlements", `{"external_reference":"BANK-123","settled_at":"` + settledAt + `"}`, http.StatusOK}} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(context.Background(), test.method, "http://shop.example.test"+test.path, strings.NewReader(test.body))
+			request.Host = "shop.example.test"
+			request.Header.Set("Authorization", "Bearer workforce")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Idempotency-Key", "operation-key")
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			if response.Code != test.want || response.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status/cache = %d/%q: %s", response.Code, response.Header().Get("Cache-Control"), response.Body.String())
+			}
+		})
+	}
+	if cancellation.StoreID != storeID || cancellation.OrderID != orderID || cancellation.ActorID != userID.String() || cancellation.IdempotencyKey != "operation-key" || momo.refundStore != storeID || momo.refundID != refundID || momo.refundActor != userID || momo.refundKey != "operation-key" || momo.settleRef != "BANK-123" || momo.settledAt.Format(time.RFC3339) != settledAt {
+		t.Fatalf("cancellation=%#v refund=%s/%s/%s/%q settlement=%q/%s", cancellation, momo.refundStore, momo.refundID, momo.refundActor, momo.refundKey, momo.settleRef, momo.settledAt)
+	}
+}
+
+func TestCancellationAndRefundRoutesDenyPermissionAndForeignPrincipal(t *testing.T) {
+	storeID, _ := ids.NewStoreID()
+	foreignStoreID, _ := ids.NewStoreID()
+	userID, _ := ids.NewUserID()
+	refundID, _ := ids.NewRefundID()
+	for _, test := range []struct {
+		name           string
+		principalStore ids.StoreID
+		allowed        bool
+		want           int
+	}{{"permission denied", storeID, false, http.StatusForbidden}, {"foreign principal", foreignStoreID, true, http.StatusUnauthorized}} {
+		t.Run(test.name, func(t *testing.T) {
+			momo := &momoServiceStub{}
+			engine := refundEngine(storeID, test.principalStore, userID, storesdomain.RoleStaff, test.allowed, paymentOrderStub{}, momo)
+			request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://shop.example.test/api/v1/admin/refunds/"+refundID.String()+"/momo-executions", nil)
+			request.Host = "shop.example.test"
+			request.Header.Set("Authorization", "Bearer workforce")
+			request.Header.Set("Idempotency-Key", "operation-key")
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			if response.Code != test.want || momo.refundID != "" {
+				t.Fatalf("status = %d, want %d, service refund = %s", response.Code, test.want, momo.refundID)
+			}
+		})
+	}
+}
+
+func TestRefundRouteMapsConflict(t *testing.T) {
+	storeID, _ := ids.NewStoreID()
+	userID, _ := ids.NewUserID()
+	refundID, _ := ids.NewRefundID()
+	momo := &momoServiceStub{refundErr: application.ErrConflict}
+	engine := refundEngine(storeID, storeID, userID, storesdomain.RoleOwner, true, paymentOrderStub{}, momo)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "http://shop.example.test/api/v1/admin/refunds/"+refundID.String()+"/momo-executions", nil)
+	request.Host = "shop.example.test"
+	request.Header.Set("Authorization", "Bearer workforce")
+	request.Header.Set("Idempotency-Key", "operation-key")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func refundEngine(storeID, principalStore ids.StoreID, userID ids.UserID, role storesdomain.Role, allowed bool, orders paymentOrderStub, momo *momoServiceStub) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	subdomain, _ := storesdomain.ParseSubdomain("shop")
+	hosts := tenant.NewHostMiddleware(paymentHostResolver{store: storesapplication.StoreRecord{StoreID: storeID, Subdomain: subdomain, Status: storesdomain.StoreStatusActive, DefaultCurrency: "VND"}}, "example.test", "auth.example.test", slog.New(slog.DiscardHandler), time.Second)
+	authenticate := func(ctx *gin.Context) {
+		ctx.Request = ctx.Request.WithContext(authn.WithPrincipal(ctx.Request.Context(), authn.NewUserPrincipal(principalStore.String(), userID.String(), "session")))
+		ctx.Next()
+	}
+	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(paymentTenantRepository{storeID: storeID, userID: userID, role: role}), slog.New(slog.DiscardHandler), time.Second)
+	NewHandler(&paymentServiceStub{}, orders, paymentAuthenticatorStub{}, authenticate, tenantMiddleware, permissionStub{allowed: allowed}, slog.New(slog.DiscardHandler), time.Second).WithMoMo(momo, 35*time.Second).WithRefunds().Register(engine, hosts)
+	return engine
 }
 
 func TestPaymentErrorClassifications(t *testing.T) {

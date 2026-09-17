@@ -183,7 +183,7 @@ Webhook processing inserts or claims the receipt and applies the business effect
 
 Provider configuration ciphertext contains algorithm, nonce, ciphertext, and key version in bounded binary/text columns. The encryption master or wrapping key remains outside PostgreSQL.
 
-Migration 8 implements versioned encrypted VietQR configuration, encrypted attempt snapshots, idempotent manual confirmations, reconciliation items, and versioned explicit staff payment permissions. Migration 9 generalizes the provider constraints for MoMo, adds opaque callback routing, and persists deduplicated signed webhook receipts. Refunds remain target-schema work.
+Migration 8 implements versioned encrypted VietQR configuration, encrypted attempt snapshots, idempotent manual confirmations, reconciliation items, and versioned explicit staff payment permissions. Migration 9 generalizes the provider constraints for MoMo, adds opaque callback routing, and persists deduplicated signed webhook receipts. Migration 10 adds captured MoMo transaction identities, tenant-owned full refunds, cancellation idempotency, refund payment states, explicit cancellation/refund permissions, and immutable refund-restock ledgers.
 
 ### Shipping
 
@@ -225,7 +225,7 @@ Payments coordinates one PostgreSQL transaction for validated webhook success or
 
 ### Cancellation and refund
 
-Eligibility and order version are locked before transition. Unpaid cancellation and reservation release are atomic. Paid cancellation creates one full-refund record; provider work occurs after commit and later applies one durable result. Financial state is not marked refunded before settlement evidence.
+Eligibility and order version are locked before transition. Unpaid cancellation and reservation release are atomic. Paid cancellation creates one full-refund record; provider work occurs after commit and later applies one durable result. Financial state is not marked refunded before settlement evidence. Successful settlement locks order, payment, refund, and ordered stock rows, then atomically records refund/payment completion, exact snapshot-based restock ledgers, terminal order history, audit, and outbox facts.
 
 ## Query and index policy
 
@@ -252,6 +252,8 @@ If one store becomes a sustained noisy neighbor, introduce a tenant-placement in
 ## Migration policy
 
 Migration 00002 backfills existing task-3 memberships with passwordless user rows and the `owner` role before adding the composite user foreign key and non-null role constraint. It leaves no role default; every later membership insert must state its role. The migration is still pre-release and may be edited only while confirmed undeployed outside disposable databases.
+
+Migration 00010 targets the pre-production schema-9 dataset. Before deployment, operators count successful MoMo attempts and paid receipts, reject missing or multiple receipt identities, and measure the single transaction-ID backfill plus validation scans against a production-sized copy. If those scans exceed the migration window, split the backfill into a separately deployed bounded job before applying the final constraints; retained financial data is forward-fixed rather than down-migrated.
 
 - Migrations are forward-only, versioned, and run before code that requires them.
 - Prefer expand/backfill/validate/contract for populated tables.

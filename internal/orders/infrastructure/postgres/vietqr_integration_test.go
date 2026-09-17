@@ -68,6 +68,14 @@ func (orders blockingPaymentOrders) MarkPaidInTransaction(ctx context.Context, t
 	return orders.delegate.MarkPaidInTransaction(ctx, tx, storeID, order, paymentID, now, correlationID)
 }
 
+func (orders blockingPaymentOrders) LockForRefundInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID) (ordersapplication.RefundOrder, error) {
+	return orders.delegate.LockForRefundInTransaction(ctx, tx, storeID, orderID)
+}
+
+func (orders blockingPaymentOrders) MarkRefundedInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, order ordersapplication.RefundOrder, refundID ids.RefundID, now time.Time, correlationID string) error {
+	return orders.delegate.MarkRefundedInTransaction(ctx, tx, storeID, order, refundID, now, correlationID)
+}
+
 func (authorizer blockingPaymentAuthorizer) HasPermissionInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, userID ids.UserID, permission string) (bool, error) {
 	allowed, err := authorizer.delegate.HasPermissionInTransaction(ctx, tx, storeID, userID, permission)
 	if permission == string(storesdomain.PermissionPaymentConfirm) {

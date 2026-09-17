@@ -94,6 +94,32 @@ type WebhookResult struct {
 	Created bool
 }
 
+type Refund struct {
+	StoreID            ids.StoreID   `json:"-"`
+	ID                 ids.RefundID  `json:"refund_id"`
+	OrderID            ids.OrderID   `json:"order_id"`
+	PaymentID          ids.PaymentID `json:"payment_id"`
+	Provider           string        `json:"provider"`
+	AmountMinor        int64         `json:"amount_minor"`
+	Currency           string        `json:"currency"`
+	Reason             string        `json:"reason"`
+	State              string        `json:"state"`
+	ProviderResultCode *int          `json:"provider_result_code,omitempty"`
+	ExternalReference  string        `json:"external_reference,omitempty"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	SettledAt          *time.Time    `json:"settled_at,omitempty"`
+	Created            bool          `json:"created,omitempty"`
+}
+
+func ValidateCancellationReason(value string) (string, error) {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) < 1 || len(value) > 240 {
+		return "", ErrInvalidPayment
+	}
+	return value, nil
+}
+
 type MoMoResultClass int
 
 const (
@@ -107,6 +133,17 @@ func ClassifyMoMoResult(code int) MoMoResultClass {
 	case 0:
 		return MoMoResultSuccess
 	case 10, 1000, 7000, 7002:
+		return MoMoResultRetryable
+	default:
+		return MoMoResultFinal
+	}
+}
+
+func ClassifyMoMoRefundResult(code int) MoMoResultClass {
+	switch code {
+	case 0:
+		return MoMoResultSuccess
+	case 10, 1000, 1080, 1081, 7000, 7002:
 		return MoMoResultRetryable
 	default:
 		return MoMoResultFinal

@@ -10,6 +10,7 @@ import (
 	auditdomain "github.com/ah2909/e-commerce/internal/audit/domain"
 	eventdomain "github.com/ah2909/e-commerce/internal/eventing/domain"
 	inventoryapplication "github.com/ah2909/e-commerce/internal/inventory/application"
+	inventorydomain "github.com/ah2909/e-commerce/internal/inventory/domain"
 	ordersapplication "github.com/ah2909/e-commerce/internal/orders/application"
 	ordersdomain "github.com/ah2909/e-commerce/internal/orders/domain"
 	"github.com/ah2909/e-commerce/internal/payments/application"
@@ -34,11 +35,14 @@ type PaymentOrders interface {
 	LoadForPaymentInstructionInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (ordersapplication.PaymentOrder, error)
 	LockForPaymentInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (ordersapplication.PayableOrder, error)
 	MarkPaidInTransaction(context.Context, *gorm.DB, ids.StoreID, ordersapplication.PayableOrder, ids.PaymentID, time.Time, string) error
+	LockForRefundInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (ordersapplication.RefundOrder, error)
+	MarkRefundedInTransaction(context.Context, *gorm.DB, ids.StoreID, ordersapplication.RefundOrder, ids.RefundID, time.Time, string) error
 }
 
 type PaymentInventory interface {
 	ValidateOrderPaymentInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time) error
 	ConfirmOrderInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time, string) error
+	RestockRefundInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.RefundID, []inventorydomain.Allocation, time.Time, string) error
 }
 
 type PaymentAudit interface {
@@ -102,6 +106,7 @@ type attemptRow struct {
 	InstructionKeyVersion int       `gorm:"column:instruction_key_version"`
 	State                 string    `gorm:"column:state"`
 	ProviderResultCode    *int      `gorm:"column:provider_result_code"`
+	ProviderTransactionID *int64    `gorm:"column:provider_transaction_id"`
 	ExpiresAt             time.Time `gorm:"column:expires_at"`
 	CreatedAt             time.Time `gorm:"column:created_at"`
 	UpdatedAt             time.Time `gorm:"column:updated_at"`

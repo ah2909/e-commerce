@@ -23,11 +23,13 @@ import (
 var ErrInvalidResponse = errors.New("invalid MoMo response")
 
 type Client struct {
-	httpClient  *http.Client
-	createURL   string
-	redirectURL string
-	publicURL   string
-	sandbox     bool
+	httpClient     *http.Client
+	createURL      string
+	redirectURL    string
+	publicURL      string
+	sandbox        bool
+	refundURL      string
+	refundQueryURL string
 }
 
 func NewClient(httpClient *http.Client, baseURL, redirectURL, publicURL string) (Client, error) {
@@ -40,7 +42,8 @@ func NewClient(httpClient *http.Client, baseURL, redirectURL, publicURL string) 
 	if redirectErr != nil || publicErr != nil || public.RawQuery != "" || public.Fragment != "" {
 		return Client{}, fmt.Errorf("invalid MoMo callback URL")
 	}
-	return Client{httpClient: httpClient, createURL: strings.TrimRight(base.String(), "/") + "/v2/gateway/api/create", redirectURL: redirect.String(), publicURL: strings.TrimRight(public.String(), "/"), sandbox: base.Hostname() == "test-payment.momo.vn"}, nil
+	root := strings.TrimRight(base.String(), "/")
+	return Client{httpClient: httpClient, createURL: root + "/v2/gateway/api/create", refundURL: root + "/v2/gateway/api/refund", refundQueryURL: root + "/v2/gateway/api/refund/query", redirectURL: redirect.String(), publicURL: strings.TrimRight(public.String(), "/"), sandbox: base.Hostname() == "test-payment.momo.vn"}, nil
 }
 
 type createRequest struct {
@@ -166,8 +169,139 @@ func (client Client) VerifyIPN(raw []byte, credentials application.MoMoCredentia
 	return domain.MoMoIPN{PartnerCode: value.PartnerCode, OrderID: value.OrderID, RequestID: value.RequestID, AmountMinor: value.Amount, OrderInfo: value.OrderInfo, OrderType: value.OrderType, Transaction: value.TransID, ResultCode: value.ResultCode, Message: value.Message, PayType: value.PayType, ResponseMS: value.ResponseMS, ExtraData: value.ExtraData}, nil
 }
 
+type refundRequest struct {
+	PartnerCode string `json:"partnerCode"`
+	OrderID     string `json:"orderId"`
+	RequestID   string `json:"requestId"`
+	Amount      int64  `json:"amount"`
+	TransID     int64  `json:"transId"`
+	Language    string `json:"lang"`
+	Description string `json:"description"`
+	Signature   string `json:"signature"`
+}
+
+type refundResponse struct {
+	PartnerCode  string `json:"partnerCode"`
+	OrderID      string `json:"orderId"`
+	RequestID    string `json:"requestId"`
+	Amount       int64  `json:"amount"`
+	TransID      int64  `json:"transId"`
+	ResultCode   int    `json:"resultCode"`
+	Message      string `json:"message"`
+	ResponseTime int64  `json:"responseTime"`
+	TransGroup   any    `json:"transGroup,omitempty"`
+}
+
+type refundQueryRequest struct {
+	PartnerCode string `json:"partnerCode"`
+	OrderID     string `json:"orderId"`
+	RequestID   string `json:"requestId"`
+	Language    string `json:"lang"`
+	Signature   string `json:"signature"`
+}
+
+type refundQueryItem struct {
+	OrderID     string `json:"orderId"`
+	Amount      int64  `json:"amount"`
+	ResultCode  int    `json:"resultCode"`
+	TransID     int64  `json:"transId"`
+	CreatedTime int64  `json:"createdTime"`
+}
+
+type refundQueryResponse struct {
+	PartnerCode  string            `json:"partnerCode"`
+	OrderID      string            `json:"orderId"`
+	RequestID    string            `json:"requestId"`
+	ResultCode   int               `json:"resultCode"`
+	Message      string            `json:"message"`
+	ResponseTime int64             `json:"responseTime"`
+	RefundTrans  []refundQueryItem `json:"refundTrans"`
+	Items        any               `json:"items,omitempty"`
+}
+
+func (client Client) Refund(ctx context.Context, input application.MoMoRefundRequest) (application.MoMoRefundResponse, error) {
+	if input.AmountMinor < 1000 || input.AmountMinor > 50_000_000 || input.OriginalTransaction <= 0 || len(input.ProviderOrderID) < 1 || len(input.ProviderOrderID) > 64 || len(input.RequestID) < 1 || len(input.RequestID) > 50 || len(input.Description) > 255 {
+		return application.MoMoRefundResponse{}, ErrInvalidResponse
+	}
+	request := refundRequest{PartnerCode: input.PartnerCode, OrderID: input.ProviderOrderID, RequestID: input.RequestID, Amount: input.AmountMinor, TransID: input.OriginalTransaction, Language: "vi", Description: input.Description}
+	request.Signature = sign(input.SecretKey, refundCanonical(input.AccessKey, request))
+	var response refundResponse
+	if err := client.postJSON(ctx, client.refundURL, request, &response); err != nil {
+		return application.MoMoRefundResponse{}, err
+	}
+	if response.PartnerCode != input.PartnerCode || response.OrderID != input.ProviderOrderID || response.RequestID != input.RequestID || response.Amount != input.AmountMinor || response.ResponseTime <= 0 || (response.ResultCode == 0 && response.TransID <= 0) {
+		return application.MoMoRefundResponse{}, &application.MoMoGatewayError{}
+	}
+	class := domain.ClassifyMoMoRefundResult(response.ResultCode)
+	return application.MoMoRefundResponse{ResultCode: response.ResultCode, RefundTransactionID: response.TransID, Success: response.ResultCode == 0, Retryable: class == domain.MoMoResultRetryable}, nil
+}
+
+func (client Client) QueryRefund(ctx context.Context, input application.MoMoRefundRequest) (application.MoMoRefundResponse, error) {
+	request := refundQueryRequest{PartnerCode: input.PartnerCode, OrderID: input.ProviderOrderID, RequestID: input.RequestID, Language: "vi"}
+	request.Signature = sign(input.SecretKey, refundQueryCanonical(input.AccessKey, request))
+	var response refundQueryResponse
+	if err := client.postJSON(ctx, client.refundQueryURL, request, &response); err != nil {
+		return application.MoMoRefundResponse{}, err
+	}
+	if response.PartnerCode != input.PartnerCode || response.OrderID != input.ProviderOrderID || response.RequestID != input.RequestID || response.ResponseTime <= 0 {
+		return application.MoMoRefundResponse{}, &application.MoMoGatewayError{}
+	}
+	for _, item := range response.RefundTrans {
+		if item.OrderID != input.ProviderOrderID || item.Amount != input.AmountMinor {
+			continue
+		}
+		class := domain.ClassifyMoMoRefundResult(item.ResultCode)
+		return application.MoMoRefundResponse{ResultCode: item.ResultCode, RefundTransactionID: item.TransID, Success: item.ResultCode == 0 && item.TransID > 0, Retryable: class == domain.MoMoResultRetryable}, nil
+	}
+	if response.ResultCode == 0 {
+		return application.MoMoRefundResponse{ResultCode: response.ResultCode, NotFound: true}, nil
+	}
+	class := domain.ClassifyMoMoRefundResult(response.ResultCode)
+	return application.MoMoRefundResponse{ResultCode: response.ResultCode, Retryable: class == domain.MoMoResultRetryable}, nil
+}
+
+func (client Client) postJSON(ctx context.Context, target string, input, output any) error {
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return &application.MoMoGatewayError{}
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		final := response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != http.StatusRequestTimeout && response.StatusCode != http.StatusTooManyRequests
+		return &application.MoMoGatewayError{Final: final}
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
+		return &application.MoMoGatewayError{}
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return &application.MoMoGatewayError{}
+	}
+	return nil
+}
+
 func createCanonical(accessKey string, value createRequest) string {
 	return "accessKey=" + accessKey + "&amount=" + strconv.FormatInt(value.Amount, 10) + "&extraData=" + value.ExtraData + "&ipnUrl=" + value.IPNURL + "&orderId=" + value.OrderID + "&orderInfo=" + value.OrderInfo + "&partnerCode=" + value.PartnerCode + "&redirectUrl=" + value.RedirectURL + "&requestId=" + value.RequestID + "&requestType=" + value.RequestType
+}
+
+func refundCanonical(accessKey string, value refundRequest) string {
+	return "accessKey=" + accessKey + "&amount=" + strconv.FormatInt(value.Amount, 10) + "&description=" + value.Description + "&orderId=" + value.OrderID + "&partnerCode=" + value.PartnerCode + "&requestId=" + value.RequestID + "&transId=" + strconv.FormatInt(value.TransID, 10)
+}
+
+func refundQueryCanonical(accessKey string, value refundQueryRequest) string {
+	return "accessKey=" + accessKey + "&orderId=" + value.OrderID + "&partnerCode=" + value.PartnerCode + "&requestId=" + value.RequestID
 }
 
 func ipnCanonical(accessKey string, value ipnBody) string {

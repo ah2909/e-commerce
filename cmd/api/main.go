@@ -201,9 +201,13 @@ func run() error {
 				shippingRepository := shippingpostgres.NewRepository(connection.GORM)
 				shippingService := shippingapplication.NewService(shippingRepository)
 				shippinghttp.NewHandler(shippingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
-				orderRepository := orderspostgres.NewRepository(connection.GORM, cartRepository, catalogRepository, pricingRepository, customerRepository, shippingRepository, inventoryRepository, paymentspostgres.NewParticipant(), eventingpostgres.NewWriter())
+				orderRepository := orderspostgres.NewRepository(connection.GORM, cartRepository, catalogRepository, pricingRepository, customerRepository, shippingRepository, inventoryRepository, paymentspostgres.NewParticipant(eventingpostgres.NewWriter()), eventingpostgres.NewWriter()).WithCancellation(auditpostgres.NewWriter(), storeRepository)
 				orderService := ordersapplication.NewService(orderRepository)
-				ordershttp.NewHandler(orderService, identityService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+				orderHandler := ordershttp.NewHandler(orderService, identityService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout)
+				if refundsAvailable(schemaVersion) {
+					orderHandler = orderHandler.WithCancellation()
+				}
+				orderHandler.Register(engine, hostMiddleware)
 				if paymentsAvailable(schemaVersion) {
 					storesHandler.RegisterPaymentPermissions(engine, hostMiddleware)
 					keyring, err := paymentsecret.New(cfg.PaymentConfigKeys, cfg.PaymentConfigActiveVersion)
@@ -220,6 +224,9 @@ func run() error {
 						}
 						configuredPayments := paymentService.WithMoMo(paymentRepository, momoClient)
 						paymentHandler = paymentHandler.WithMoMo(configuredPayments, cfg.MoMoRequestTimeout)
+						if refundsAvailable(schemaVersion) {
+							paymentHandler = paymentHandler.WithRefunds()
+						}
 					}
 					paymentHandler.Register(engine, hostMiddleware)
 				}
@@ -258,6 +265,7 @@ func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
 func ordersAvailable(schemaVersion int64) bool    { return schemaVersion >= 7 }
 func paymentsAvailable(schemaVersion int64) bool  { return schemaVersion >= 8 }
 func momoAvailable(schemaVersion int64) bool      { return schemaVersion >= 9 }
+func refundsAvailable(schemaVersion int64) bool   { return schemaVersion >= 10 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

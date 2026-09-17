@@ -89,6 +89,8 @@ Email consumers receive a purpose-limited contact snapshot or retrieve it throug
 
 `payment.confirmed.v1`, `order.paid.v1`, and `inventory.reservation_confirmed.v1` describe business states already committed together by the payment-confirmation transaction. Their consumers do not transition Orders or Inventory. A duplicate webhook or manual command reuses the existing outcome and does not emit a second business transition. Late, expired, cancelled, or mismatched funds emit reconciliation only.
 
+`refund.succeeded.v1`, `order.cancelled.v1`, and refund-restock inventory facts describe states already committed by the refund-application transaction. Consumers must not repeat the payment transition, order transition, or stock mutation.
+
 ## Publication and consumption
 
 ### Outbox publisher

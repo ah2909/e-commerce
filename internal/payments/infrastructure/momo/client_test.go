@@ -88,6 +88,17 @@ func TestResultClassification(t *testing.T) {
 	}
 }
 
+func TestRefundResultClassificationPreservesAmbiguousProviderOutcomes(t *testing.T) {
+	for _, test := range []struct {
+		code  int
+		class domain.MoMoResultClass
+	}{{0, domain.MoMoResultSuccess}, {1080, domain.MoMoResultRetryable}, {1081, domain.MoMoResultRetryable}, {7000, domain.MoMoResultRetryable}, {7002, domain.MoMoResultRetryable}, {1001, domain.MoMoResultFinal}} {
+		if got := domain.ClassifyMoMoRefundResult(test.code); got != test.class {
+			t.Fatalf("ClassifyMoMoRefundResult(%d) = %v", test.code, got)
+		}
+	}
+}
+
 func TestVerifyIPNRejectsSuccessfulResultWithoutTransaction(t *testing.T) {
 	credentials := application.MoMoCredentials{PartnerCode: "MOMO", AccessKey: "access", SecretKey: "secret"}
 	value := ipnBody{PartnerCode: credentials.PartnerCode, OrderID: "order", RequestID: "01991e94-53f6-7aa0-8773-697ecf61f7a1", Amount: 1000, OrderInfo: "Order", OrderType: "momo_wallet", ResultCode: 0, Message: "Successful.", PayType: "qr", ResponseMS: time.Now().UnixMilli()}
@@ -116,6 +127,67 @@ func TestCreateClassifiesHTTPFailures(t *testing.T) {
 		var gatewayErr *application.MoMoGatewayError
 		if !errors.As(err, &gatewayErr) || gatewayErr.Final != test.final {
 			t.Fatalf("Create() status %d error = %#v", test.status, err)
+		}
+	}
+}
+
+func TestRefundAndQueryUseStableSignedIdentities(t *testing.T) {
+	input := application.MoMoRefundRequest{MoMoCredentials: application.MoMoCredentials{PartnerCode: "MOMOTEST", AccessKey: "refund-access", SecretKey: "refund-secret-123456"}, AmountMinor: 125000, ProviderOrderID: "RF0123456789abcdef0123456789abcdef", RequestID: "01234567-89ab-4cde-8fab-0123456789ab", OriginalTransaction: 4088878653, Description: "Full refund"}
+	calls := 0
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if strings.HasSuffix(request.URL.Path, "/refund/query") {
+			var sent refundQueryRequest
+			if err := json.NewDecoder(request.Body).Decode(&sent); err != nil {
+				t.Fatal(err)
+			}
+			if sent.Signature != sign(input.SecretKey, refundQueryCanonical(input.AccessKey, sent)) || sent.OrderID != input.ProviderOrderID || sent.RequestID != input.RequestID {
+				t.Fatalf("invalid refund query = %#v", sent)
+			}
+			response := refundQueryResponse{PartnerCode: input.PartnerCode, OrderID: input.ProviderOrderID, RequestID: input.RequestID, ResultCode: 0, ResponseTime: time.Now().UnixMilli(), RefundTrans: []refundQueryItem{{OrderID: input.ProviderOrderID, Amount: input.AmountMinor, ResultCode: 0, TransID: 998877}}}
+			raw, _ := json.Marshal(response)
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+		}
+		var sent refundRequest
+		if err := json.NewDecoder(request.Body).Decode(&sent); err != nil {
+			t.Fatal(err)
+		}
+		if sent.Signature != sign(input.SecretKey, refundCanonical(input.AccessKey, sent)) || sent.TransID != input.OriginalTransaction || sent.Amount != input.AmountMinor {
+			t.Fatalf("invalid refund request = %#v", sent)
+		}
+		response := refundResponse{PartnerCode: input.PartnerCode, OrderID: input.ProviderOrderID, RequestID: input.RequestID, Amount: input.AmountMinor, TransID: 998877, ResultCode: 0, ResponseTime: time.Now().UnixMilli()}
+		raw, _ := json.Marshal(response)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+	})
+	client, err := NewClient(&http.Client{Transport: transport}, "https://test-payment.momo.vn", "https://shop.example.test/return", "https://payments.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refunded, err := client.Refund(context.Background(), input)
+	if err != nil || !refunded.Success || refunded.RefundTransactionID != 998877 {
+		t.Fatalf("Refund() = %#v, %v", refunded, err)
+	}
+	queried, err := client.QueryRefund(context.Background(), input)
+	if err != nil || !queried.Success || queried.RefundTransactionID != 998877 || calls != 2 {
+		t.Fatalf("QueryRefund() = %#v, %v, calls=%d", queried, err, calls)
+	}
+}
+
+func TestRefundClassifiesHTTPFailures(t *testing.T) {
+	for _, test := range []struct {
+		status int
+		final  bool
+	}{{http.StatusBadRequest, true}, {http.StatusUnauthorized, true}, {http.StatusRequestTimeout, false}, {http.StatusTooManyRequests, false}, {http.StatusInternalServerError, false}} {
+		client := Client{httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		})}, refundURL: "https://test-payment.momo.vn/v2/gateway/api/refund", refundQueryURL: "https://test-payment.momo.vn/v2/gateway/api/refund/query"}
+		input := application.MoMoRefundRequest{MoMoCredentials: application.MoMoCredentials{PartnerCode: "MOMO", AccessKey: "access", SecretKey: "secret"}, AmountMinor: 1000, ProviderOrderID: "refund-order", RequestID: "refund-request", OriginalTransaction: 1}
+		for name, call := range map[string]func(context.Context, application.MoMoRefundRequest) (application.MoMoRefundResponse, error){"refund": client.Refund, "query": client.QueryRefund} {
+			_, err := call(context.Background(), input)
+			var gatewayErr *application.MoMoGatewayError
+			if !errors.As(err, &gatewayErr) || gatewayErr.Final != test.final {
+				t.Fatalf("%s status %d error = %#v", name, test.status, err)
+			}
 		}
 	}
 }

@@ -19,3 +19,15 @@ type PaymentOrder struct {
 	State                domain.State
 	ReservationExpiresAt time.Time
 }
+
+type RefundLine struct {
+	VariantID ids.VariantID
+	Quantity  int64
+}
+
+type RefundOrder struct {
+	OrderID ids.OrderID
+	State   domain.State
+	Version int64
+	Lines   []RefundLine
+}

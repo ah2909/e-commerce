@@ -12,9 +12,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type Participant struct{}
+type Participant struct{ events PaymentEvents }
 
-func NewParticipant() Participant { return Participant{} }
+func NewParticipant(events ...PaymentEvents) Participant {
+	value := Participant{}
+	if len(events) > 0 {
+		value.events = events[0]
+	}
+	return value
+}
 
 type paymentRow struct {
 	StoreID     string     `gorm:"column:store_id"`

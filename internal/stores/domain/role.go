@@ -22,6 +22,8 @@ const (
 	PermissionInventoryManage   Permission = "inventory.manage"
 	PermissionPaymentConfirm    Permission = "payment.confirm"
 	PermissionPaymentReconcile  Permission = "payment.reconcile.view"
+	PermissionOrderCancel       Permission = "order.cancel"
+	PermissionPaymentRefund     Permission = "payment.refund"
 )
 
 func ParseRole(value string) (Role, error) {
@@ -35,9 +37,9 @@ func ParseRole(value string) (Role, error) {
 func (role Role) Allows(permission Permission) bool {
 	switch role {
 	case RoleOwner:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionMembershipsManage || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile || permission == PermissionOrderCancel || permission == PermissionPaymentRefund
 	case RoleAdmin:
-		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile
+		return permission == PermissionStoreView || permission == PermissionStoreManage || permission == PermissionMembershipsView || permission == PermissionCatalogManage || permission == PermissionPricingManage || permission == PermissionInventoryView || permission == PermissionInventoryManage || permission == PermissionPaymentConfirm || permission == PermissionPaymentReconcile || permission == PermissionOrderCancel || permission == PermissionPaymentRefund
 	case RoleStaff:
 		return permission == PermissionStoreView
 	default:

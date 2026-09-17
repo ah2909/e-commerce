@@ -23,6 +23,7 @@ import (
 	pricingpostgres "github.com/ah2909/e-commerce/internal/pricing/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	shippingpostgres "github.com/ah2909/e-commerce/internal/shipping/infrastructure/postgres"
+	storespostgres "github.com/ah2909/e-commerce/internal/stores/infrastructure/postgres"
 	"github.com/ah2909/e-commerce/internal/testsupport/gormtest"
 	"github.com/ah2909/e-commerce/internal/testsupport/storefixture"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -326,5 +327,6 @@ func orderRepository(t testing.TB, pool *pgxpool.Pool, events Events) *Repositor
 	catalog := catalogpostgres.NewRepository(db)
 	pricing := pricingpostgres.NewRepository(db, catalogpostgres.NewVariantLocker())
 	inventory := inventorypostgres.NewRepository(db, catalogpostgres.NewVariantLocker(), auditpostgres.NewWriter(), eventingpostgres.NewWriter())
-	return NewRepository(db, cartspostgres.NewRepository(db), catalog, pricing, customerspostgres.NewRepository(db), shippingpostgres.NewRepository(db), inventory, paymentspostgres.NewParticipant(), events)
+	eventWriter := eventingpostgres.NewWriter()
+	return NewRepository(db, cartspostgres.NewRepository(db), catalog, pricing, customerspostgres.NewRepository(db), shippingpostgres.NewRepository(db), inventory, paymentspostgres.NewParticipant(eventWriter), events).WithCancellation(auditpostgres.NewWriter(), storespostgres.NewRepository(db, auditpostgres.NewWriter()))
 }

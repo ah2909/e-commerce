@@ -15,6 +15,8 @@ type momoRepositoryFake struct {
 	finalizedID ids.PaymentAttemptID
 	failedState string
 	processed   bool
+	refundClaim RefundClaim
+	refundState string
 }
 
 func (*momoRepositoryFake) GetMoMoConfig(context.Context, ids.StoreID) (domain.MoMoConfig, error) {
@@ -55,9 +57,42 @@ func (repository *momoRepositoryFake) ProcessMoMoIPN(context.Context, MoMoCallba
 	return domain.WebhookResult{Outcome: "paid", Created: true}, nil
 }
 
+func (repository *momoRepositoryFake) GetRefund(context.Context, ids.StoreID, ids.RefundID) (domain.Refund, error) {
+	return repository.refundClaim.Refund, nil
+}
+
+func (repository *momoRepositoryFake) ClaimMoMoRefund(context.Context, ids.StoreID, ids.RefundID, ids.UserID, string, [32]byte) (RefundClaim, error) {
+	return repository.refundClaim, nil
+}
+
+func (repository *momoRepositoryFake) RecordMoMoRefundFailure(_ context.Context, _ ids.StoreID, _ ids.RefundID, _ int, retryable bool) (domain.Refund, error) {
+	repository.refundState = "failed"
+	if retryable {
+		repository.refundState = "reconciliation_required"
+	}
+	result := repository.refundClaim.Refund
+	result.State = repository.refundState
+	return result, nil
+}
+
+func (repository *momoRepositoryFake) ApplyRefundSuccess(context.Context, ids.StoreID, ids.RefundID, ids.UserID, int, int64, string, time.Time) (domain.Refund, error) {
+	repository.refundState = "succeeded"
+	result := repository.refundClaim.Refund
+	result.State = repository.refundState
+	return result, nil
+}
+
+func (*momoRepositoryFake) SettleVietQRRefund(context.Context, ids.StoreID, ids.RefundID, ids.UserID, string, [32]byte, string, time.Time, string) (domain.Refund, error) {
+	return domain.Refund{}, nil
+}
+
 type momoGatewayFake struct {
-	calls int
-	err   error
+	calls       int
+	err         error
+	refundCalls int
+	queryCalls  int
+	query       MoMoRefundResponse
+	refund      MoMoRefundResponse
 }
 
 func (gateway *momoGatewayFake) Create(context.Context, MoMoCreateRequest) (MoMoCreateResponse, error) {
@@ -67,6 +102,16 @@ func (gateway *momoGatewayFake) Create(context.Context, MoMoCreateRequest) (MoMo
 
 func (*momoGatewayFake) VerifyIPN([]byte, MoMoCredentials) (domain.MoMoIPN, error) {
 	return domain.MoMoIPN{Transaction: 1}, nil
+}
+
+func (gateway *momoGatewayFake) Refund(context.Context, MoMoRefundRequest) (MoMoRefundResponse, error) {
+	gateway.refundCalls++
+	return gateway.refund, gateway.err
+}
+
+func (gateway *momoGatewayFake) QueryRefund(context.Context, MoMoRefundRequest) (MoMoRefundResponse, error) {
+	gateway.queryCalls++
+	return gateway.query, gateway.err
 }
 
 func TestStartMoMoFinalizesClaimedAttemptIdentity(t *testing.T) {
@@ -109,5 +154,38 @@ func TestHandleMoMoIPNRequiresBoundedInput(t *testing.T) {
 	}
 	if _, err := service.HandleMoMoIPN(context.Background(), "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", []byte(`{}`), "request"); err != nil || !repository.processed {
 		t.Fatalf("HandleMoMoIPN() error = %v, processed=%v", err, repository.processed)
+	}
+}
+
+func TestExecuteMoMoRefundQueriesAmbiguousAttemptBeforeRetry(t *testing.T) {
+	refundID := ids.RefundID("55555555-5555-4555-8555-555555555555")
+	repository := &momoRepositoryFake{refundClaim: RefundClaim{Refund: domain.Refund{ID: refundID, AmountMinor: 1000}, OriginalTransaction: 44, ProviderOrderID: "refund-order", RequestID: "refund-request", ShouldQuery: true}}
+	gateway := &momoGatewayFake{query: MoMoRefundResponse{NotFound: true}, refund: MoMoRefundResponse{ResultCode: 0, RefundTransactionID: 77, Success: true}}
+	service := NewService(nil).WithMoMo(repository, gateway)
+	result, err := service.ExecuteMoMoRefund(context.Background(), ids.StoreID("11111111-1111-4111-8111-111111111111"), refundID, ids.UserID("66666666-6666-4666-8666-666666666666"), "refund-execution")
+	if err != nil || result.State != "succeeded" || gateway.queryCalls != 1 || gateway.refundCalls != 1 {
+		t.Fatalf("ExecuteMoMoRefund() = %#v, %v, queries=%d refunds=%d", result, err, gateway.queryCalls, gateway.refundCalls)
+	}
+}
+
+func TestExecuteMoMoRefundDoesNotRepeatSettledProviderRefund(t *testing.T) {
+	refundID := ids.RefundID("55555555-5555-4555-8555-555555555555")
+	repository := &momoRepositoryFake{refundClaim: RefundClaim{Refund: domain.Refund{ID: refundID, AmountMinor: 1000}, OriginalTransaction: 44, ProviderOrderID: "refund-order", RequestID: "refund-request", ShouldQuery: true}}
+	gateway := &momoGatewayFake{query: MoMoRefundResponse{ResultCode: 0, RefundTransactionID: 77, Success: true}}
+	service := NewService(nil).WithMoMo(repository, gateway)
+	result, err := service.ExecuteMoMoRefund(context.Background(), ids.StoreID("11111111-1111-4111-8111-111111111111"), refundID, ids.UserID("66666666-6666-4666-8666-666666666666"), "refund-execution")
+	if err != nil || result.State != "succeeded" || gateway.queryCalls != 1 || gateway.refundCalls != 0 {
+		t.Fatalf("ExecuteMoMoRefund() = %#v, %v, queries=%d refunds=%d", result, err, gateway.queryCalls, gateway.refundCalls)
+	}
+}
+
+func TestExecuteMoMoRefundPersistsPermanentGatewayFailure(t *testing.T) {
+	refundID := ids.RefundID("55555555-5555-4555-8555-555555555555")
+	repository := &momoRepositoryFake{refundClaim: RefundClaim{Refund: domain.Refund{ID: refundID, AmountMinor: 1000}, OriginalTransaction: 44, ProviderOrderID: "refund-order", RequestID: "refund-request", ShouldCall: true}}
+	gateway := &momoGatewayFake{err: &MoMoGatewayError{Final: true}}
+	service := NewService(nil).WithMoMo(repository, gateway)
+	_, err := service.ExecuteMoMoRefund(context.Background(), ids.StoreID("11111111-1111-4111-8111-111111111111"), refundID, ids.UserID("66666666-6666-4666-8666-666666666666"), "refund-execution")
+	if !errors.Is(err, ErrUnavailable) || repository.refundState != "failed" {
+		t.Fatalf("ExecuteMoMoRefund() error=%v state=%s", err, repository.refundState)
 	}
 }

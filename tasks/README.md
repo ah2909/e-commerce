@@ -34,6 +34,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [011 Single-location Inventory](archive/011-single-location-inventory.md) | Tenant-safe stock, immutable ledgers, audited adjustments, atomic reservations, public availability, and expiry processing |
 | [012 Customers and carts](archive/012-customers-and-carts.md) | Tenant-safe customer profiles and addresses, user/guest carts, current estimates, optimistic mutation, and bounded expiry |
 | [014 VietQR payments](archive/014-vietqr-payments.md) | Encrypted tenant VietQR configuration, local QR instructions, atomic audited confirmation, explicit staff permissions, and reconciliation |
+| [016 Cancellation and full refunds](archive/016-cancellation-full-refunds.md) | Tenant-safe unpaid cancellation, full MoMo/VietQR refunds, atomic restock, and concurrency/isolation evidence |
 
 ## Starting work
 

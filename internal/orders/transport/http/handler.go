@@ -28,6 +28,10 @@ type Service interface {
 	GetForGrant(context.Context, ids.StoreID, ids.OrderID, string) (domain.Order, error)
 }
 
+type CancellationService interface {
+	Cancel(context.Context, application.CancellationCommand) (application.CancellationResult, error)
+}
+
 type UserAuthenticator interface {
 	AuthenticateUser(context.Context, ids.StoreID, string) (identityapplication.UserRecord, string, error)
 }
@@ -38,6 +42,13 @@ type Handler struct {
 	authenticateShopper gin.HandlerFunc
 	logger              *slog.Logger
 	timeout             time.Duration
+	cancellationEnabled bool
+	cancellations       CancellationService
+}
+
+func (handler Handler) WithCancellation() Handler {
+	handler.cancellations, handler.cancellationEnabled = handler.service.(CancellationService), true
+	return handler
 }
 
 func NewHandler(service Service, authenticator UserAuthenticator, authenticateShopper gin.HandlerFunc, logger *slog.Logger, timeout time.Duration) Handler {
@@ -50,6 +61,60 @@ func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware)
 	router.POST("/api/v1/checkout", checkout...)
 	router.GET("/api/v1/orders/:order_id", read...)
 	router.HEAD("/api/v1/orders/:order_id", read...)
+	if handler.cancellationEnabled {
+		router.POST("/api/v1/orders/:order_id/cancellations", hosts.TenantGin(), handler.withTimeout(), handler.cancel)
+	}
+}
+
+func (handler Handler) cancel(ctx *gin.Context) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if !decode(ctx, &body) {
+		return
+	}
+	store, ok := tenant.StoreFromContext(ctx.Request.Context())
+	orderID, err := ids.ParseOrderID(ctx.Param("order_id"))
+	token, hasToken := bearer(ctx.Request)
+	if !ok || err != nil {
+		handler.notFound(ctx)
+		return
+	}
+	if !hasToken {
+		problem.Write(ctx.Writer, ctx.Request, http.StatusUnauthorized, "authentication_required", "Order authentication is required.", nil)
+		return
+	}
+	command := application.CancellationCommand{StoreID: store.StoreID, OrderID: orderID, IdempotencyKey: idempotencyKey(ctx.Request), Reason: body.Reason, RequestID: httpserver.RequestID(ctx.Request.Context())}
+	user, _, authErr := handler.authenticator.AuthenticateUser(ctx.Request.Context(), store.StoreID, token)
+	if authErr == nil {
+		if _, err = handler.service.GetForUser(ctx.Request.Context(), store.StoreID, orderID, user.ID); err != nil {
+			handler.writeError(ctx, err)
+			return
+		}
+		command.ActorType, command.ActorID = application.CancellationUser, user.ID.String()
+	} else {
+		order, grantErr := handler.service.GetForGrant(ctx.Request.Context(), store.StoreID, orderID, token)
+		if grantErr != nil {
+			handler.writeError(ctx, grantErr)
+			return
+		}
+		command.ActorType, command.ActorID = application.CancellationGuest, order.Owner.GuestID.String()
+	}
+	if handler.cancellations == nil {
+		handler.writeError(ctx, application.ErrUnprocessable)
+		return
+	}
+	value, err := handler.cancellations.Cancel(ctx.Request.Context(), command)
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	status := http.StatusOK
+	if value.Created {
+		status = http.StatusCreated
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(status, value)
 }
 
 type checkoutRequest struct {
@@ -144,8 +209,10 @@ func (handler Handler) writeError(ctx *gin.Context, err error) {
 		handler.notFound(ctx)
 	case errors.Is(err, application.ErrConflict):
 		problem.Write(ctx.Writer, ctx.Request, http.StatusConflict, "checkout_conflict", "Checkout conflicts with current state.", nil)
+	case errors.Is(err, application.ErrForbidden):
+		problem.Write(ctx.Writer, ctx.Request, http.StatusForbidden, "permission_denied", "Permission is denied.", nil)
 	case errors.Is(err, application.ErrUnprocessable):
-		problem.Write(ctx.Writer, ctx.Request, http.StatusUnprocessableEntity, "checkout_unavailable", "Checkout is unavailable for the current cart.", nil)
+		problem.Write(ctx.Writer, ctx.Request, http.StatusUnprocessableEntity, "order_operation_unavailable", "The order operation is unavailable for the current state.", nil)
 	default:
 		handler.logger.Error("order operation failed", "request_id", httpserver.RequestID(ctx.Request.Context()))
 		var networkError net.Error

@@ -464,7 +464,7 @@ func (repository *Repository) ProcessMoMoIPN(ctx context.Context, callback appli
 				if err := repository.orders.MarkPaidInTransaction(ctx, tx, callback.StoreID, order, ids.PaymentID(payment.PaymentID), now, correlationID); err != nil {
 					return err
 				}
-				attemptUpdate := tx.Model(&attemptRow{}).Where("store_id=? AND attempt_id=? AND state IN ('creating','retryable','action_required')", callback.StoreID.String(), attempt.AttemptID).Updates(map[string]any{"state": "succeeded", "provider_result_code": ipn.ResultCode, "updated_at": now})
+				attemptUpdate := tx.Model(&attemptRow{}).Where("store_id=? AND attempt_id=? AND state IN ('creating','retryable','action_required')", callback.StoreID.String(), attempt.AttemptID).Updates(map[string]any{"state": "succeeded", "provider_result_code": ipn.ResultCode, "provider_transaction_id": ipn.Transaction, "updated_at": now})
 				if attemptUpdate.Error != nil || attemptUpdate.RowsAffected != 1 {
 					if attemptUpdate.Error != nil {
 						return attemptUpdate.Error

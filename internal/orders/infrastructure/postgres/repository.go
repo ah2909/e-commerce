@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	auditdomain "github.com/ah2909/e-commerce/internal/audit/domain"
 	cartsapplication "github.com/ah2909/e-commerce/internal/carts/application"
 	cartsdomain "github.com/ah2909/e-commerce/internal/carts/domain"
 	catalogapplication "github.com/ah2909/e-commerce/internal/catalog/application"
@@ -51,12 +52,23 @@ type Shipping interface {
 type Inventory interface {
 	ReserveInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, []inventorydomain.Allocation, string) ([]inventorydomain.Reservation, error)
 	ExpireOrderInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time, string) (bool, error)
+	ReleaseOrderInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time, string) (bool, error)
 }
 
 type Payments interface {
 	CreatePendingInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.PaymentID, ids.OrderID, string, money.Money, time.Time) (paymentsdomain.Payment, error)
 	ExpireInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time) (paymentsdomain.Payment, error)
 	LoadInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (paymentsdomain.Payment, error)
+	CancelPendingInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, time.Time) (paymentsdomain.Payment, error)
+	CreateRefundInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.RefundID, ids.OrderID, ids.UserID, string, string, [32]byte, time.Time) (paymentsdomain.Refund, error)
+}
+
+type CancellationAudit interface {
+	Insert(context.Context, *gorm.DB, auditdomain.Record) error
+}
+
+type CancellationAuthorizer interface {
+	HasPermissionInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.UserID, string) (bool, error)
 }
 
 type Events interface {
@@ -73,6 +85,13 @@ type Repository struct {
 	inventory Inventory
 	payments  Payments
 	events    Events
+	audit     CancellationAudit
+	authorize CancellationAuthorizer
+}
+
+func (repository *Repository) WithCancellation(audit CancellationAudit, authorize CancellationAuthorizer) *Repository {
+	repository.audit, repository.authorize = audit, authorize
+	return repository
 }
 
 func NewRepository(db *gorm.DB, carts Carts, catalog Catalog, pricing Pricing, customers Customers, shipping Shipping, inventory Inventory, payments Payments, events Events) *Repository {

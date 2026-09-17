@@ -36,11 +36,17 @@ import (
 )
 
 type momoGatewayFixture struct {
-	request  paymentsapplication.MoMoCreateRequest
-	ipn      paymentsdomain.MoMoIPN
-	response *paymentsapplication.MoMoCreateResponse
-	err      error
-	calls    int
+	request        paymentsapplication.MoMoCreateRequest
+	ipn            paymentsdomain.MoMoIPN
+	response       *paymentsapplication.MoMoCreateResponse
+	err            error
+	calls          int
+	refundResponse paymentsapplication.MoMoRefundResponse
+	queryResponse  paymentsapplication.MoMoRefundResponse
+	refundErr      error
+	queryErr       error
+	refundCalls    int
+	queryCalls     int
 }
 
 type validatingMoMoGateway struct{ *momoGatewayFixture }
@@ -74,6 +80,14 @@ func (orders preblockingPaymentOrders) MarkPaidInTransaction(ctx context.Context
 	return orders.delegate.MarkPaidInTransaction(ctx, tx, storeID, order, paymentID, now, correlationID)
 }
 
+func (orders preblockingPaymentOrders) LockForRefundInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID) (ordersapplication.RefundOrder, error) {
+	return orders.delegate.LockForRefundInTransaction(ctx, tx, storeID, orderID)
+}
+
+func (orders preblockingPaymentOrders) MarkRefundedInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, order ordersapplication.RefundOrder, refundID ids.RefundID, now time.Time, correlationID string) error {
+	return orders.delegate.MarkRefundedInTransaction(ctx, tx, storeID, order, refundID, now, correlationID)
+}
+
 func (gateway *momoGatewayFixture) Create(_ context.Context, request paymentsapplication.MoMoCreateRequest) (paymentsapplication.MoMoCreateResponse, error) {
 	gateway.request = request
 	gateway.calls++
@@ -91,6 +105,16 @@ func (gateway *momoGatewayFixture) VerifyIPN(_ []byte, credentials paymentsappli
 		return paymentsdomain.MoMoIPN{}, errors.New("credential mismatch")
 	}
 	return gateway.ipn, nil
+}
+
+func (gateway *momoGatewayFixture) Refund(context.Context, paymentsapplication.MoMoRefundRequest) (paymentsapplication.MoMoRefundResponse, error) {
+	gateway.refundCalls++
+	return gateway.refundResponse, gateway.refundErr
+}
+
+func (gateway *momoGatewayFixture) QueryRefund(context.Context, paymentsapplication.MoMoRefundRequest) (paymentsapplication.MoMoRefundResponse, error) {
+	gateway.queryCalls++
+	return gateway.queryResponse, gateway.queryErr
 }
 
 func signedMoMoIPN(request paymentsapplication.MoMoCreateRequest, amount, transaction int64, resultCode int) []byte {

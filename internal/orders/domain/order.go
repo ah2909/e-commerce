@@ -167,6 +167,12 @@ func CanTransition(from, to State) bool {
 	}
 }
 
+func CanShopperCancel(state State) bool { return state == StatePendingPayment }
+
+func CanWorkforceCancel(state State) bool {
+	return state == StatePendingPayment || state == StatePaid || state == StateProcessing
+}
+
 func CheckedLineTotal(unitPrice, quantity int64) (int64, error) {
 	if unitPrice < 0 || quantity < 1 || quantity > 2147483647 || (unitPrice != 0 && quantity > math.MaxInt64/unitPrice) {
 		return 0, ErrInvalidOrder

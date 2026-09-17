@@ -41,6 +41,9 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/payment-providers/vietqr", "/api/v1/memberships/{user_id}/permissions",
 		"/api/v1/orders/{order_id}/payments/vietqr/instructions", "/api/v1/admin/payments/{payment_id}/vietqr-confirmations",
 		"/api/v1/admin/payment-reconciliation-items",
+		"/api/v1/orders/{order_id}/cancellations", "/api/v1/admin/orders/{order_id}/cancellations",
+		"/api/v1/admin/refunds/{refund_id}", "/api/v1/admin/refunds/{refund_id}/momo-executions",
+		"/api/v1/admin/refunds/{refund_id}/vietqr-settlements",
 		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
 	}
 	for _, path := range wantPaths {
@@ -92,6 +95,11 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertOperationContract(t, document, "/api/v1/orders/{order_id}/payments/vietqr/instructions", "post", false, []string{"200", "201", "400", "401", "404", "409", "422", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/payments/{payment_id}/vietqr-confirmations", "post", true, []string{"200", "201", "400", "401", "403", "404", "409", "422", "503"})
 	assertOperationContract(t, document, "/api/v1/admin/payment-reconciliation-items", "get", false, []string{"200", "400", "401", "403", "503"})
+	assertOperationContract(t, document, "/api/v1/orders/{order_id}/cancellations", "post", true, []string{"200", "201", "400", "401", "404", "409", "422", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/orders/{order_id}/cancellations", "post", true, []string{"200", "201", "400", "401", "403", "404", "409", "422", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/refunds/{refund_id}", "get", false, []string{"200", "401", "403", "404", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/refunds/{refund_id}/momo-executions", "post", false, []string{"200", "400", "401", "403", "404", "409", "422", "503"})
+	assertOperationContract(t, document, "/api/v1/admin/refunds/{refund_id}/vietqr-settlements", "post", true, []string{"200", "400", "401", "403", "404", "409", "422", "503"})
 	assertSecurityScheme(t, document, "/api/v1/onboarding/stores", "post", "platformAdminBearer")
 	assertSecurityScheme(t, document, "/api/v1/admin/catalog/products", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/pricing/price-lists", "post", "bearerAuth")
@@ -101,6 +109,8 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertSecurityScheme(t, document, "/api/v1/checkout", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/payment-providers/vietqr", "put", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/payments/{payment_id}/vietqr-confirmations", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/admin/orders/{order_id}/cancellations", "post", "bearerAuth")
+	assertSecurityScheme(t, document, "/api/v1/admin/refunds/{refund_id}/momo-executions", "post", "bearerAuth")
 	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)

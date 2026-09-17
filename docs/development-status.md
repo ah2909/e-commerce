@@ -3,7 +3,7 @@
 ## Snapshot
 
 - Assessed: 2026-09-14
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, and 014
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, 014, and 016
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -26,6 +26,8 @@ Accepted [task 013](../tasks/archive/013-checkout-orders.md) implements atomic u
 Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypted tenant VietQR configuration, local dynamic QR instructions, idempotent audited manual confirmation, atomic order/inventory settlement, explicit staff payment permissions, and tenant-scoped reconciliation. Both independent reviews and final verification passed.
 
 [Task 015](../tasks/015-momo-payments.md) implements encrypted tenant MoMo configuration, bounded signed provider requests, idempotent attempts, raw-body signed IPNs, atomic automatic settlement, and reconciliation. Independent architecture/security reviews and the complete automated verification gate pass; live MoMo sandbox acceptance remains pending external credentials and a reachable HTTPS callback.
+
+Accepted [task 016](../tasks/archive/016-cancellation-full-refunds.md) implements tenant-safe unpaid cancellation, workforce full-refund requests, MoMo refund/query execution, audited VietQR settlement, and atomic refund restock. Both independent reviews and final verification passed.
 
 ## Status meanings
 
@@ -52,7 +54,7 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 | Checkout and orders | Implemented and accepted | Accepted task 013 adds migration 7, the atomic checkout coordinator, immutable snapshots, central lifecycle policy, tenant idempotency, guest grants, order reads, and order-first expiry. |
 | VietQR payments | Implemented and accepted | Accepted task 014 adds encrypted provider configuration, local QR instructions, audited manual confirmation, atomic settlement, staff payment permissions, and reconciliation. |
 | MoMo payments | Implemented, changes required | Task 015 passed independent reviews and complete automated verification; live sandbox initiation and signed callback delivery remain required before acceptance. |
-| Cancellation and refunds | Not started | No order cancellation or full-refund workflow exists. |
+| Cancellation and refunds | Implemented and accepted | Accepted task 016 implements shopper/workforce cancellation, explicit permissions, provider-specific full-refund settlement, atomic restock, and tenant/concurrency/rollback evidence. |
 | Shipping and fulfillment | Partially implemented | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Shipment, carrier, tracking, and fulfillment transitions remain unimplemented. |
 | Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
 | Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
@@ -113,7 +115,13 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 - opaque callback-route resolution and raw-body-digest webhook receipt deduplication
 - provider result-code capture with tenant and provider binding constraints
 
-The schema intentionally does not include platform operators. It also does not include post-MVP coupons, Refunds, shipments, or inbox tables.
+### Migration 00010
+
+- captured successful MoMo transaction identifiers and tenant-owned full-refund/cancellation records
+- expanded payment, permission, audit, and inventory-ledger constraints for refund workflows
+- tenant-scoped idempotency/provider-reference uniqueness and operational refund-state indexes
+
+The schema intentionally does not include platform operators. It also does not include post-MVP coupons, shipments, or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -141,7 +149,7 @@ These positives do not waive the blockers above.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`.
 
-Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Task 015 adds redacted MoMo configuration, shopper attempts, and the public signed-IPN route. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, callback routing data, and foreign customer/cart/order/payment data are not public. Post-MVP coupons, refunds, fulfillment, and event-administration endpoints remain absent.
+Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Task 015 adds redacted MoMo configuration, shopper attempts, and the public signed-IPN route. Task 016 adds owned unpaid cancellation plus permissioned cancellation, refund reads, MoMo execution, and VietQR settlement. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, callback routing data, and foreign customer/cart/order/payment/refund data are not public. Post-MVP coupons, fulfillment, and event-administration endpoints remain absent.
 
 ## Verification evidence
 
@@ -183,10 +191,12 @@ Task 013 final verification on 2026-09-13: both independent reviews passed after
 
 Task 014 final verification on 2026-09-14: both independent reviews passed after transactional workforce authorization, terminal payment-state preservation, unambiguous replay/outbox identities, retryable dependency classification, reservation-unavailable reconciliation, production key safeguards, and expanded rollback, migration, route, QR-decoding, and synchronized expiry/adjustment/revocation evidence. The complete `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 8, and vulnerability scanning with no vulnerabilities in called or imported packages.
 
+Task 016 final verification on 2026-09-17: both independent reviews passed after full-refund financial binding, refund-specific MoMo classification, serialized replay, settlement-time validation, provider-identity uniqueness, migration hardening, Gin boundary evidence, and expanded tenant, race, rollback, and schema-9 backfill tests. The complete `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 10, and vulnerability scanning with no vulnerabilities in called or imported packages.
+
 ## Required next work
 
-1. Implement MoMo execution and signed webhook confirmation.
+1. Implement shipping and fulfillment.
 
-Five roadmap slices remain after VietQR payments before MVP production if each slice is delivered as one task. Coupons and redemption accounting follow the MVP production gate.
+Shipping/fulfillment, event workers, and operational hardening remain before MVP production. Coupons and redemption accounting follow the MVP production gate.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

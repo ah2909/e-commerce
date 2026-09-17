@@ -31,6 +31,8 @@ type PaymentID string
 type PaymentAttemptID string
 type ReconciliationID string
 type ShippingRuleID string
+type RefundID string
+type CancellationID string
 
 func ParseStoreID(value string) (StoreID, error) {
 	value, err := parseUUID(value)
@@ -96,6 +98,10 @@ func ParseReconciliationID(value string) (ReconciliationID, error) {
 func ParseShippingRuleID(value string) (ShippingRuleID, error) {
 	return parseTypedID[ShippingRuleID](value, "shipping rule")
 }
+func ParseRefundID(value string) (RefundID, error) { return parseTypedID[RefundID](value, "refund") }
+func ParseCancellationID(value string) (CancellationID, error) {
+	return parseTypedID[CancellationID](value, "cancellation")
+}
 
 func NewStoreID() (StoreID, error)         { value, err := newUUID(); return StoreID(value), err }
 func NewUserID() (UserID, error)           { value, err := newUUID(); return UserID(value), err }
@@ -136,6 +142,11 @@ func NewShippingRuleID() (ShippingRuleID, error) {
 	value, err := newUUID()
 	return ShippingRuleID(value), err
 }
+func NewRefundID() (RefundID, error) { value, err := newUUID(); return RefundID(value), err }
+func NewCancellationID() (CancellationID, error) {
+	value, err := newUUID()
+	return CancellationID(value), err
+}
 
 func (id StoreID) String() string          { return string(id) }
 func (id UserID) String() string           { return string(id) }
@@ -158,6 +169,8 @@ func (id PaymentID) String() string        { return string(id) }
 func (id PaymentAttemptID) String() string { return string(id) }
 func (id ReconciliationID) String() string { return string(id) }
 func (id ShippingRuleID) String() string   { return string(id) }
+func (id RefundID) String() string         { return string(id) }
+func (id CancellationID) String() string   { return string(id) }
 
 func parseTypedID[T ~string](value, name string) (T, error) {
 	parsed, err := parseUUID(value)

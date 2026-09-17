@@ -41,9 +41,19 @@ type MoMoService interface {
 	HandleMoMoIPN(context.Context, string, []byte, string) (domain.WebhookResult, error)
 }
 
+type RefundService interface {
+	GetRefund(context.Context, ids.StoreID, ids.RefundID) (domain.Refund, error)
+	ExecuteMoMoRefund(context.Context, ids.StoreID, ids.RefundID, ids.UserID, string) (domain.Refund, error)
+	SettleVietQRRefund(context.Context, ids.StoreID, ids.RefundID, ids.UserID, string, string, time.Time, string) (domain.Refund, error)
+}
+
 type OrderReader interface {
 	GetForUser(context.Context, ids.StoreID, ids.OrderID, ids.UserID) (ordersdomain.Order, error)
 	GetForGrant(context.Context, ids.StoreID, ids.OrderID, string) (ordersdomain.Order, error)
+}
+
+type OrderCanceller interface {
+	Cancel(context.Context, ordersapplication.CancellationCommand) (ordersapplication.CancellationResult, error)
 }
 
 type UserAuthenticator interface {
@@ -55,21 +65,30 @@ type PermissionChecker interface {
 }
 
 type Handler struct {
-	service       Service
-	orders        OrderReader
-	authenticator UserAuthenticator
-	authenticate  gin.HandlerFunc
-	tenant        tenant.Middleware
-	permissions   PermissionChecker
-	logger        *slog.Logger
-	timeout       time.Duration
-	momo          MoMoService
-	momoTimeout   time.Duration
+	service        Service
+	orders         OrderReader
+	authenticator  UserAuthenticator
+	authenticate   gin.HandlerFunc
+	tenant         tenant.Middleware
+	permissions    PermissionChecker
+	logger         *slog.Logger
+	timeout        time.Duration
+	momo           MoMoService
+	momoTimeout    time.Duration
+	refundsEnabled bool
+	refunds        RefundService
+	cancellations  OrderCanceller
 }
 
 func (handler Handler) WithMoMo(service MoMoService, timeout time.Duration) Handler {
 	handler.momo = service
 	handler.momoTimeout = timeout
+	return handler
+}
+
+func (handler Handler) WithRefunds() Handler {
+	handler.refunds, handler.refundsEnabled = handler.momo.(RefundService), true
+	handler.cancellations, _ = handler.orders.(OrderCanceller)
 	return handler
 }
 
@@ -92,6 +111,115 @@ func (handler Handler) Register(router gin.IRoutes, hosts tenant.HostMiddleware)
 		router.PUT("/api/v1/admin/payment-providers/momo", append(config, handler.replaceMoMoConfig)...)
 		router.POST("/api/v1/orders/:order_id/payments/momo/attempts", hosts.TenantGin(), handler.withMoMoTimeout(), handler.startMoMo)
 		router.POST("/api/v1/payment-webhooks/momo/:callback_token", handler.withTimeout(), handler.handleMoMoIPN)
+		if handler.refundsEnabled {
+			router.POST("/api/v1/admin/orders/:order_id/cancellations", append(workforce, handler.require(storesdomain.PermissionOrderCancel), handler.cancelOrder)...)
+			router.GET("/api/v1/admin/refunds/:refund_id", append(workforce, handler.require(storesdomain.PermissionPaymentRefund), handler.getRefund)...)
+			router.POST("/api/v1/admin/refunds/:refund_id/momo-executions", append(workforce, handler.require(storesdomain.PermissionPaymentRefund), handler.withMoMoTimeout(), handler.executeMoMoRefund)...)
+			router.POST("/api/v1/admin/refunds/:refund_id/vietqr-settlements", append(workforce, handler.require(storesdomain.PermissionPaymentRefund), handler.settleVietQRRefund)...)
+		}
+	}
+}
+
+func (handler Handler) cancelOrder(ctx *gin.Context) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if !decode(ctx, &body) {
+		return
+	}
+	orderID, err := ids.ParseOrderID(ctx.Param("order_id"))
+	if err != nil {
+		handler.notFound(ctx)
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	if handler.cancellations == nil {
+		handler.writeOrderError(ctx, ordersapplication.ErrUnprocessable)
+		return
+	}
+	value, err := handler.cancellations.Cancel(ctx.Request.Context(), ordersapplication.CancellationCommand{StoreID: resolved.StoreID(), OrderID: orderID, ActorType: ordersapplication.CancellationWorkforce, ActorID: resolved.UserID().String(), IdempotencyKey: idempotencyKey(ctx.Request), Reason: body.Reason, RequestID: httpserver.RequestID(ctx.Request.Context())})
+	if err != nil {
+		handler.writeOrderError(ctx, err)
+		return
+	}
+	status := http.StatusOK
+	if value.Created {
+		status = http.StatusCreated
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(status, value)
+}
+
+func (handler Handler) getRefund(ctx *gin.Context) {
+	refundID, err := ids.ParseRefundID(ctx.Param("refund_id"))
+	if err != nil {
+		handler.notFound(ctx)
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	value, err := handler.refunds.GetRefund(ctx.Request.Context(), resolved.StoreID(), refundID)
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, value)
+}
+
+func (handler Handler) executeMoMoRefund(ctx *gin.Context) {
+	refundID, err := ids.ParseRefundID(ctx.Param("refund_id"))
+	if err != nil {
+		handler.notFound(ctx)
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	value, err := handler.refunds.ExecuteMoMoRefund(ctx.Request.Context(), resolved.StoreID(), refundID, resolved.UserID(), idempotencyKey(ctx.Request))
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, value)
+}
+
+func (handler Handler) settleVietQRRefund(ctx *gin.Context) {
+	var body struct {
+		ExternalReference string `json:"external_reference"`
+		SettledAt         string `json:"settled_at"`
+	}
+	if !decode(ctx, &body) {
+		return
+	}
+	refundID, idErr := ids.ParseRefundID(ctx.Param("refund_id"))
+	settledAt, timeErr := time.Parse(time.RFC3339, body.SettledAt)
+	if idErr != nil || timeErr != nil {
+		handler.writeError(ctx, domain.ErrInvalidPayment)
+		return
+	}
+	resolved, _ := tenant.FromContext(ctx.Request.Context())
+	value, err := handler.refunds.SettleVietQRRefund(ctx.Request.Context(), resolved.StoreID(), refundID, resolved.UserID(), idempotencyKey(ctx.Request), body.ExternalReference, settledAt, httpserver.RequestID(ctx.Request.Context()))
+	if err != nil {
+		handler.writeError(ctx, err)
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, value)
+}
+
+func (handler Handler) writeOrderError(ctx *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ordersdomain.ErrInvalidOrder):
+		problem.Write(ctx.Writer, ctx.Request, http.StatusBadRequest, "invalid_cancellation", "Cancellation input is invalid.", nil)
+	case errors.Is(err, ordersapplication.ErrNotFound):
+		handler.notFound(ctx)
+	case errors.Is(err, ordersapplication.ErrConflict):
+		problem.Write(ctx.Writer, ctx.Request, http.StatusConflict, "cancellation_conflict", "Cancellation conflicts with the recorded request.", nil)
+	case errors.Is(err, ordersapplication.ErrForbidden):
+		problem.Write(ctx.Writer, ctx.Request, http.StatusForbidden, "permission_denied", "Permission is denied.", nil)
+	case errors.Is(err, ordersapplication.ErrUnprocessable):
+		problem.Write(ctx.Writer, ctx.Request, http.StatusUnprocessableEntity, "cancellation_unavailable", "Cancellation is unavailable for the current order.", nil)
+	default:
+		handler.writeError(ctx, err)
 	}
 }
 

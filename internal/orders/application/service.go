@@ -16,6 +16,7 @@ import (
 
 var ErrNotFound = errors.New("order not found")
 var ErrConflict = errors.New("order conflict")
+var ErrForbidden = errors.New("order operation forbidden")
 var ErrUnprocessable = errors.New("checkout unavailable")
 
 type CheckoutCommand struct {
@@ -45,11 +46,54 @@ type CheckoutResult struct {
 	Created          bool         `json:"-"`
 }
 
+type CancellationActor string
+
+const (
+	CancellationUser      CancellationActor = "user"
+	CancellationGuest     CancellationActor = "guest"
+	CancellationWorkforce CancellationActor = "workforce"
+)
+
+type CancellationCommand struct {
+	StoreID        ids.StoreID
+	OrderID        ids.OrderID
+	ActorType      CancellationActor
+	ActorID        string
+	IdempotencyKey string
+	Reason         string
+	RequestID      string
+}
+
+type CancellationResult struct {
+	OrderID  ids.OrderID  `json:"order_id"`
+	State    domain.State `json:"state"`
+	RefundID ids.RefundID `json:"refund_id,omitempty"`
+	Created  bool         `json:"created"`
+}
+
 type Repository interface {
 	Checkout(context.Context, PreparedCheckout) (domain.Order, bool, error)
 	GetForUser(context.Context, ids.StoreID, ids.OrderID, ids.UserID) (domain.Order, error)
 	GetForGrant(context.Context, ids.StoreID, ids.OrderID, [32]byte) (domain.Order, error)
 	ExpireDue(context.Context, int, string) (int, error)
+}
+
+type CancellationRepository interface {
+	Cancel(context.Context, CancellationCommand, [32]byte) (CancellationResult, error)
+}
+
+func (service Service) Cancel(ctx context.Context, command CancellationCommand) (CancellationResult, error) {
+	command.Reason = strings.Join(strings.Fields(command.Reason), " ")
+	command.IdempotencyKey = strings.TrimSpace(command.IdempotencyKey)
+	if command.StoreID == "" || command.OrderID == "" || command.ActorID == "" || len(command.IdempotencyKey) < 1 || len(command.IdempotencyKey) > 128 || len(command.Reason) < 1 || len(command.Reason) > 240 || strings.TrimSpace(command.RequestID) == "" || (command.ActorType != CancellationUser && command.ActorType != CancellationGuest && command.ActorType != CancellationWorkforce) {
+		return CancellationResult{}, domain.ErrInvalidOrder
+	}
+	fingerprint := sha256.Sum256([]byte(command.OrderID.String() + "\x00" + string(command.ActorType) + "\x00" + command.ActorID + "\x00" + command.Reason))
+	repository, ok := service.repository.(CancellationRepository)
+	if !ok {
+		return CancellationResult{}, ErrUnprocessable
+	}
+	return repository.Cancel(ctx, command, fingerprint)
 }
 
 type Service struct{ repository Repository }

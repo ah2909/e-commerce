@@ -105,14 +105,14 @@ func (manager MembershipManager) Update(ctx context.Context, command UpdateMembe
 }
 
 func (manager MembershipManager) ReplacePermissions(ctx context.Context, command ReplacePermissionsCommand) (int64, error) {
-	if command.StoreID == "" || command.ActorID == "" || command.UserID == "" || command.ExpectedVersion < 0 || command.RequestID == "" || len(command.Permissions) > 2 {
+	if command.StoreID == "" || command.ActorID == "" || command.UserID == "" || command.ExpectedVersion < 0 || command.RequestID == "" || len(command.Permissions) > 4 {
 		return 0, domain.ErrInvalidMembership
 	}
 	seen := map[domain.Permission]struct{}{}
 	permissions := make([]domain.Permission, 0, len(command.Permissions))
 	for _, value := range command.Permissions {
 		permission := domain.Permission(value)
-		if permission != domain.PermissionPaymentConfirm && permission != domain.PermissionPaymentReconcile {
+		if permission != domain.PermissionPaymentConfirm && permission != domain.PermissionPaymentReconcile && permission != domain.PermissionOrderCancel && permission != domain.PermissionPaymentRefund {
 			return 0, domain.ErrInvalidMembership
 		}
 		if _, exists := seen[permission]; exists {
