@@ -163,6 +163,8 @@ Shipping coordinates a single manual shipment per paid order. Each mutation lock
 - Outbox and inbox identities include `store_id`; one tenant's event identifier cannot deduplicate or suppress another tenant's work.
 - Events may be out of order across aggregates. Consumers use aggregate version or explicit state checks where order matters.
 - Credentials, raw provider payloads, access tokens, and unnecessary personal data are excluded.
+- Publisher claims use short expiring PostgreSQL leases and publish outside transactions. Search, analytics, and email-intent groups fail independently and commit inbox/effect state before Kafka offsets.
+- Durable terminal records contain validated bounded envelopes only; malformed records retain a digest and redacted broker metadata rather than attacker-controlled bodies.
 
 ## Data and secrets
 

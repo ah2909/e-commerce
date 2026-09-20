@@ -42,6 +42,10 @@ const (
 	maxCartExpiryPoll              = 15 * time.Minute
 	defaultMoMoRequestTimeout      = 35 * time.Second
 	maxMoMoRequestTimeout          = 60 * time.Second
+	defaultEventPoll               = time.Second
+	defaultEventLease              = 30 * time.Second
+	defaultEventRetryBase          = time.Second
+	defaultEventRetryMax           = 5 * time.Minute
 )
 
 type RateLimit struct {
@@ -53,6 +57,15 @@ type CredentialRateLimit struct {
 	PeerMaximum     int
 	IdentityMaximum int
 	Window          time.Duration
+}
+
+type Eventing struct {
+	Batch       int
+	Poll        time.Duration
+	Lease       time.Duration
+	MaxAttempts int
+	RetryBase   time.Duration
+	RetryMax    time.Duration
 }
 
 type Config struct {
@@ -99,6 +112,7 @@ type Config struct {
 	MoMoRedirectURL            string
 	MoMoPublicURL              string
 	MoMoRequestTimeout         time.Duration
+	Eventing                   Eventing
 }
 
 type LookupFunc func(string) (string, bool)
@@ -261,6 +275,30 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err := validateMoMoURLs(appEnv, momoAPIBaseURL, momoRedirectURL, momoPublicURL); err != nil {
 		return Config{}, err
 	}
+	eventBatch, err := integer(lookup, "EVENT_BATCH", 50, 1, 500)
+	if err != nil {
+		return Config{}, err
+	}
+	eventPoll, err := duration(lookup, "EVENT_POLL", defaultEventPoll, time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	eventLease, err := duration(lookup, "EVENT_CLAIM_LEASE", defaultEventLease, 10*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	eventMaxAttempts, err := integer(lookup, "EVENT_MAX_ATTEMPTS", 12, 1, 100)
+	if err != nil {
+		return Config{}, err
+	}
+	eventRetryBase, err := duration(lookup, "EVENT_RETRY_BASE", defaultEventRetryBase, time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	eventRetryMax, err := duration(lookup, "EVENT_RETRY_MAX", defaultEventRetryMax, 24*time.Hour)
+	if err != nil || eventRetryMax < eventRetryBase {
+		return Config{}, fmt.Errorf("EVENT_RETRY_MAX must be at least EVENT_RETRY_BASE and at most 24h0m0s")
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
@@ -306,6 +344,7 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		MoMoRedirectURL:            momoRedirectURL,
 		MoMoPublicURL:              momoPublicURL,
 		MoMoRequestTimeout:         momoRequestTimeout,
+		Eventing:                   Eventing{Batch: eventBatch, Poll: eventPoll, Lease: eventLease, MaxAttempts: eventMaxAttempts, RetryBase: eventRetryBase, RetryMax: eventRetryMax},
 	}, nil
 }
 

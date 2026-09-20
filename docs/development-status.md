@@ -3,7 +3,7 @@
 ## Snapshot
 
 - Assessed: 2026-09-20
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, 014, 016, and 017
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, 014, 016, and 017, and Task 018 implementation awaiting review
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -30,6 +30,8 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 Accepted [task 016](../tasks/archive/016-cancellation-full-refunds.md) implements tenant-safe unpaid cancellation, workforce full-refund requests, MoMo refund/query execution, audited VietQR settlement, and atomic refund restock. Both independent reviews and final verification passed.
 
 Accepted [task 017](../tasks/archive/017-simple-fulfillment.md) implements a tenant-safe single-shipment lifecycle, explicit workforce fulfillment permission, admin fulfillment reads, shopper tracking projection, and atomic processing/shipped/completed transitions. Both independent reviews and final verification passed.
+
+Accepted [Task 018](../tasks/archive/018-event-workers-derived-integrations.md) implements leased concurrent outbox publication, strict fixed-topic Kafka contracts, transactional consumer inboxes, redacted terminal records and exact requeue/replay tooling, plus Search, Analytics, and email-intent projections. Both independent reviews and final verification passed.
 
 ## Status meanings
 
@@ -58,7 +60,7 @@ Accepted [task 017](../tasks/archive/017-simple-fulfillment.md) implements a ten
 | MoMo payments | Implemented, changes required | Task 015 passed independent reviews and complete automated verification; live sandbox initiation and signed callback delivery remain required before acceptance. |
 | Cancellation and refunds | Implemented and accepted | Accepted task 016 implements shopper/workforce cancellation, explicit permissions, provider-specific full-refund settlement, atomic restock, and tenant/concurrency/rollback evidence. |
 | Shipping and fulfillment | Implemented and accepted | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Accepted task 017 adds manual one-shipment fulfillment, carrier/tracking, permissions, admin reads, atomic order/shipment transitions, and tenant/concurrency/rollback evidence. |
-| Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
+| Event workers | Implemented and accepted | Task 018 adds concurrent leased publication, bounded retry/terminal handling, five fixed Kafka topics, tenant-scoped inbox deduplication, redacted dead letters, operator inspection/requeue/replay, and rebuildable Search/Analytics/email-intent consumers. Both independent reviews and final verification passed. |
 | Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
 
 ## Implemented database schema
@@ -129,7 +131,13 @@ Accepted [task 017](../tasks/archive/017-simple-fulfillment.md) implements a ten
 - immutable fulfillment-command result snapshots and store-scoped idempotency fingerprints
 - explicit `order.fulfill` grants plus fulfillment audit actions and tenant carrier/tracking indexes
 
-The schema intentionally does not include platform operators. It also does not include post-MVP coupons or inbox tables.
+### Migration 00012
+
+- expiring claim leases, terminal/requeue state, error digests, and broker publication metadata on tenant outbox rows
+- tenant-scoped consumer inboxes plus redacted broker-coordinate dead letters with validated-envelope replay state
+- rebuildable tenant Search documents, UTC daily Analytics counts, and purpose-limited pending email intents
+
+The schema intentionally does not include platform operators, post-MVP coupons, or destructive event-retention jobs.
 
 ## Current accepted risks and release blockers
 
@@ -203,11 +211,14 @@ Task 016 final verification on 2026-09-17: both independent reviews passed after
 
 Task 017 final verification on 2026-09-20: both independent reviews passed after command shipment/order binding, actionable-state read locking, nested shipment contract alignment, and expanded authorization, tenant, pagination, concurrency, migration, and rollback evidence. The complete `make verify` run passed zero-issue lint, all unit tests, all real integration tests at schema 11, and vulnerability scanning with no vulnerabilities in called or imported code.
 
+Task 018 focused implementation evidence on 2026-09-20: event envelope/publisher unit tests and the complete unit suite passed. Migration 12 passed populated schema-11 upgrade/repeat coverage. Real PostgreSQL tests passed for tenant-scoped leased claims, claim theft denial, terminal requeue, duplicate inbox delivery, Search projections, Analytics counts, email intents, and cross-store denial. A real Kafka round trip passed publication, group delivery, synchronous offset commit, and bounded shutdown. This is development evidence, not the independent-review or final-verification gate.
+
+Task 018 final verification on 2026-09-20: both independent reviews passed after poison-row isolation, strict event-specific payload and transport validation, same-store shipment/order binding, canonical replay, bounded operational inspection, per-record publisher deadlines, and expanded PostgreSQL/Kafka recovery evidence. The clean `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 12, and vulnerability scanning with no vulnerabilities in called or imported packages.
+
 ## Required next work
 
-1. Implement event workers and derived integrations.
-2. Complete operational hardening and production-readiness evidence.
+1. Complete operational hardening and production-readiness evidence.
 
-Event workers and operational hardening remain before MVP production. Coupons and redemption accounting follow the MVP production gate.
+Operational hardening remains before MVP production. Coupons and redemption accounting follow the MVP production gate.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.

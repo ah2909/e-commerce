@@ -77,6 +77,8 @@ The checkout transaction persists the order and reservation state directly throu
 
 Email consumers receive a purpose-limited contact snapshot or retrieve it through an explicit Orders interface. General analytics events avoid delivery addresses, phone numbers, and email where identifiers suffice.
 
+`order.shipped.v1` and `order.completed.v1` use the order as the envelope aggregate. Their required `order_id` must equal that aggregate identity; `shipment_id` remains a required related identifier.
+
 ## Payment and refund events
 
 | Event | Producer | Initial consumers | Required payload identifiers |
@@ -103,18 +105,23 @@ Email consumers receive a purpose-limited contact snapshot or retrieve it throug
 - Retries transient broker errors with bounded exponential backoff and jitter.
 - Exposes oldest unpublished age, retry count, and terminal failures.
 
+The implemented routing uses `commerce.catalog.v1`, `commerce.inventory.v1`, `commerce.orders.v1`, `commerce.payments.v1`, and `commerce.shipping.v1`. The allowlisted event type selects the topic; callers cannot supply a topic. Messages use `store_id:event_id` as the key, so consumers must tolerate aggregate reordering and use current state or aggregate versions where order matters.
+
 PostgreSQL cannot atomically commit Kafka acknowledgement with its transaction. A crash after publish and before marking may republish the event; consumer idempotency is mandatory.
 
 ### Consumers
 
-- Validate envelope type/version and required store scope before processing.
+- Validate the envelope, event-specific required/allowed payload fields, aggregate/payload identity, deterministic topic, composite key, and bounded headers before processing.
 - Apply inbox insert and business effect atomically when both use PostgreSQL.
 - Acknowledge Kafka only after the durable effect or durable terminal classification.
 - Retry transient dependency failures; reject malformed/permanently unsupported messages to an observable dead-letter path.
 - Propagate correlation and causation identifiers to new outbox events without creating infinite cycles.
+
+The initial consumer groups are `search-projection-v1`, `analytics-projection-v1`, and `email-intents-v1`. Search contains public Catalog fields only, analytics stores tenant/type/day counts only, and email processing stops at a durable purpose-limited intent until a production sender is selected. Operational behavior and exact requeue commands are documented in [event worker operations](event-operations.md).
 
 ## Retention and privacy
 
 - Retain outbox/inbox rows long enough to diagnose and safely cover broker/consumer replay windows; exact periods are an operator decision before production.
 - Partition only when measured table/index maintenance or retention deletion justifies it, following [database design](database-design.md).
 - Redaction is part of schema review. Encrypting a topic does not justify publishing secrets or unnecessary personal data.
+- Only fully contract-valid envelopes may be retained for replay; every other terminal record stores broker coordinates, a digest, and bounded diagnostics only.

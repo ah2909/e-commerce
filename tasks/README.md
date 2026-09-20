@@ -36,6 +36,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 | [014 VietQR payments](archive/014-vietqr-payments.md) | Encrypted tenant VietQR configuration, local QR instructions, atomic audited confirmation, explicit staff permissions, and reconciliation |
 | [016 Cancellation and full refunds](archive/016-cancellation-full-refunds.md) | Tenant-safe unpaid cancellation, full MoMo/VietQR refunds, atomic restock, and concurrency/isolation evidence |
 | [017 Simple fulfillment](archive/017-simple-fulfillment.md) | Tenant-safe one-shipment fulfillment, permissioned admin workflow, shopper tracking projection, and atomic lifecycle evidence |
+| [018 Event workers and derived integrations](archive/018-event-workers-derived-integrations.md) | Leased Kafka publication, strict consumer contracts, transactional derived projections, redacted recovery tooling, and reliability evidence |
 
 ## Starting work
 

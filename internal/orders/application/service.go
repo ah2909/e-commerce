@@ -78,6 +78,16 @@ type Repository interface {
 	ExpireDue(context.Context, int, string) (int, error)
 }
 
+type NotificationContact struct {
+	OrderID ids.OrderID
+	Name    string
+	Email   string
+}
+
+type NotificationResolver interface {
+	ResolveNotificationContact(context.Context, ids.StoreID, ids.OrderID) (NotificationContact, error)
+}
+
 type CancellationRepository interface {
 	Cancel(context.Context, CancellationCommand, [32]byte) (CancellationResult, error)
 }
@@ -160,6 +170,17 @@ func (service Service) ExpireDue(ctx context.Context, limit int, correlationID s
 		return 0, domain.ErrInvalidOrder
 	}
 	return service.repository.ExpireDue(ctx, limit, correlationID)
+}
+
+func (service Service) ResolveNotificationContact(ctx context.Context, storeID ids.StoreID, orderID ids.OrderID) (NotificationContact, error) {
+	if storeID == "" || orderID == "" {
+		return NotificationContact{}, domain.ErrInvalidOrder
+	}
+	resolver, ok := service.repository.(NotificationResolver)
+	if !ok {
+		return NotificationContact{}, ErrUnprocessable
+	}
+	return resolver.ResolveNotificationContact(ctx, storeID, orderID)
 }
 
 func validateCommand(command *CheckoutCommand) error {

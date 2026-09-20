@@ -127,7 +127,7 @@ func TestFulfillmentLifecycleIsIdempotentAtomicAndTenantScoped(t *testing.T) {
 		t.Fatalf("shipped queue = %d, next=%q, error=%v", len(listed), next, err)
 	}
 	var commands, audits, shipmentEvents, shippedEvents, completedEvents int
-	if err := pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM shipment_commands WHERE store_id=$1 AND shipment_id=$2),(SELECT count(*) FROM audit_records WHERE store_id=$1 AND subject_id=$2),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND aggregate_id=$2),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND event_type='order.shipped.v1' AND payload->>'order_id'=$3),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND event_type='order.completed.v1' AND payload->>'order_id'=$3)`, pair.A.Store.ID(), shipment.ID, checkout.Order.ID).Scan(&commands, &audits, &shipmentEvents, &shippedEvents, &completedEvents); err != nil {
+	if err := pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM shipment_commands WHERE store_id=$1 AND shipment_id=$2),(SELECT count(*) FROM audit_records WHERE store_id=$1 AND subject_id=$2),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND payload->>'shipment_id'=$2::text),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND event_type='order.shipped.v1' AND payload->>'order_id'=$3),(SELECT count(*) FROM outbox_events WHERE store_id=$1 AND event_type='order.completed.v1' AND payload->>'order_id'=$3)`, pair.A.Store.ID(), shipment.ID, checkout.Order.ID).Scan(&commands, &audits, &shipmentEvents, &shippedEvents, &completedEvents); err != nil {
 		t.Fatal(err)
 	}
 	if commands != 4 || audits != 4 || shipmentEvents != 4 || shippedEvents != 1 || completedEvents != 1 {

@@ -209,6 +209,10 @@ Migration 11 adds one tenant shipment per order, immutable command-result snapsh
 | --- | --- | --- |
 | `outbox_events` | Transactional integration facts | PK `(store_id,event_id)`; tenant aggregate/version uniqueness; unpublished claim index |
 | `consumer_inbox` | Consumer-specific event deduplication | PK `(store_id,consumer_name,event_id)`; processed/retention index |
+| `event_dead_letters` | Redacted terminal consumer failures and validated replay state | Unique consumer/topic/partition/offset; optional validated tenant/event identity; open-failure indexes |
+| `search_documents` | Rebuildable public Catalog search projection | PK `(store_id,product_id)`; scoped slug uniqueness and aggregate-version guard |
+| `analytics_daily_counts` | Rebuildable non-personal event counts | PK `(store_id,event_date,event_type)` |
+| `notification_email_intents` | Purpose-limited pending order email intents | PK `(store_id,event_id)`; tenant order FK and pending-work index |
 
 Eventing owns the outbox/inbox schema, repositories, publisher, and delivery-deduplication contract. A producing module owns its event semantics and appends through Eventing's transaction-aware interface. Every insert, lookup, claim, uniqueness rule, and aggregate reference includes the envelope's validated `store_id`; an `event_id` never establishes tenant scope by itself. The publisher does not update business aggregates.
 

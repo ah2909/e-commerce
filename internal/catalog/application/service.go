@@ -82,6 +82,15 @@ type CartVariant struct {
 	OptionValues map[string]string
 }
 
+type SearchProduct struct {
+	ProductID        ids.ProductID
+	AggregateVersion int64
+	Name             string
+	Slug             string
+	Description      string
+	PublishedAt      time.Time
+}
+
 type CartVariantResolver interface {
 	ResolveCartVariants(context.Context, ids.StoreID, []ids.VariantID) (map[ids.VariantID]CartVariant, error)
 }
@@ -148,6 +157,28 @@ func (service Service) ResolveCartVariants(ctx context.Context, storeID ids.Stor
 		return nil, domain.ErrInvalidCatalog
 	}
 	return resolver.ResolveCartVariants(ctx, storeID, variants)
+}
+
+func (service Service) ResolveSearchProduct(ctx context.Context, storeID ids.StoreID, productID ids.ProductID) (SearchProduct, bool, error) {
+	if storeID == "" || productID == "" || service.prices == nil {
+		return SearchProduct{}, false, domain.ErrInvalidCatalog
+	}
+	product, err := service.repository.GetProduct(ctx, storeID, productID)
+	if errors.Is(err, ErrNotFound) {
+		return SearchProduct{}, false, nil
+	}
+	if err != nil {
+		return SearchProduct{}, false, fmt.Errorf("load search product: %w", err)
+	}
+	prices, err := service.prices.ResolveCurrent(ctx, storeID, activeVariantIDs([]domain.Product{product}))
+	if err != nil {
+		return SearchProduct{}, false, fmt.Errorf("resolve search prices: %w", err)
+	}
+	projected, visible := publicProduct(product, prices, nil)
+	if !visible {
+		return SearchProduct{ProductID: product.ID, AggregateVersion: product.Version}, false, nil
+	}
+	return SearchProduct{ProductID: projected.ProductID, AggregateVersion: product.Version, Name: projected.Name, Slug: projected.Slug, Description: projected.Description, PublishedAt: projected.PublishedAt}, true, nil
 }
 
 func DefaultIDGenerator() IDGenerator {

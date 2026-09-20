@@ -85,7 +85,7 @@ func (coordinator *PublicationCoordinator) Publish(ctx context.Context, storeID 
 		if err != nil {
 			return fmt.Errorf("generate publication event ID: %w", err)
 		}
-		event, err := eventdomain.New(storeID, eventID, "product.published.v1", "product", productID.String(), published.Version, databaseNow, correlationID, map[string]any{"product_id": productID.String(), "version": published.Version})
+		event, err := eventdomain.New(storeID, eventID, "product.published.v1", "product", productID.String(), published.Version, databaseNow, correlationID, map[string]any{"store_id": storeID.String(), "product_id": productID.String(), "version": published.Version})
 		if err != nil {
 			return err
 		}

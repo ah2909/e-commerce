@@ -103,10 +103,11 @@ func (repository *Repository) Mutate(ctx context.Context, command application.Co
 			if err := tx.Create(&row).Error; err != nil {
 				return classifyFulfillment(err)
 			}
-			if _, err := repository.orders.TransitionFulfillmentInTransaction(ctx, tx, command.StoreID, command.OrderID, locked.Version, ordersdomain.StatePaid, ordersdomain.StateProcessing, now, command.RequestID); err != nil {
+			orderVersion, err := repository.orders.TransitionFulfillmentInTransaction(ctx, tx, command.StoreID, command.OrderID, locked.Version, ordersdomain.StatePaid, ordersdomain.StateProcessing, now, command.RequestID)
+			if err != nil {
 				return mapFulfillmentError(err)
 			}
-			if err := repository.appendShipmentEffects(ctx, tx, command, row, "shipment.prepared", "shipment.prepared.v1", now); err != nil {
+			if err := repository.appendShipmentEffects(ctx, tx, command, row, orderVersion, "shipment.prepared", "shipment.prepared.v1", now); err != nil {
 				return err
 			}
 		case application.MutationUpdate, application.MutationDispatch, application.MutationComplete:
@@ -135,7 +136,7 @@ func (repository *Repository) Mutate(ctx context.Context, command application.Co
 				if err := tx.Model(&shipmentRow{}).Where("store_id=? AND shipment_id=? AND version=?", row.StoreID, row.ShipmentID, command.ExpectedVersion).Updates(map[string]any{"carrier": row.Carrier, "tracking_number": row.TrackingNumber, "version": row.Version, "updated_at": now}).Error; err != nil {
 					return err
 				}
-				if err := repository.appendShipmentEffects(ctx, tx, command, row, "shipment.updated", "shipment.updated.v1", now); err != nil {
+				if err := repository.appendShipmentEffects(ctx, tx, command, row, locked.Version, "shipment.updated", "shipment.updated.v1", now); err != nil {
 					return err
 				}
 			} else {
@@ -146,7 +147,8 @@ func (repository *Repository) Mutate(ctx context.Context, command application.Co
 				if locked.State != fromOrder || row.State != string(fromShipment) || !domain.CanTransition(fromShipment, toShipment) {
 					return application.ErrUnprocessable
 				}
-				if _, err := repository.orders.TransitionFulfillmentInTransaction(ctx, tx, command.StoreID, orderID, locked.Version, fromOrder, toOrder, now, command.RequestID); err != nil {
+				orderVersion, err := repository.orders.TransitionFulfillmentInTransaction(ctx, tx, command.StoreID, orderID, locked.Version, fromOrder, toOrder, now, command.RequestID)
+				if err != nil {
 					return mapFulfillmentError(err)
 				}
 				row.State, row.Version, row.UpdatedAt = string(toShipment), row.Version+1, now
@@ -160,7 +162,7 @@ func (repository *Repository) Mutate(ctx context.Context, command application.Co
 				if update.Error != nil || update.RowsAffected != 1 {
 					return application.ErrConflict
 				}
-				if err := repository.appendShipmentEffects(ctx, tx, command, row, action, eventType, now); err != nil {
+				if err := repository.appendShipmentEffects(ctx, tx, command, row, orderVersion, action, eventType, now); err != nil {
 					return err
 				}
 			}
@@ -185,7 +187,7 @@ func (repository *Repository) ListOrders(ctx context.Context, storeID ids.StoreI
 	return values, next, mapFulfillmentError(err)
 }
 
-func (repository *Repository) appendShipmentEffects(ctx context.Context, tx *gorm.DB, command application.Command, row shipmentRow, action, eventType string, now time.Time) error {
+func (repository *Repository) appendShipmentEffects(ctx context.Context, tx *gorm.DB, command application.Command, row shipmentRow, orderVersion int64, action, eventType string, now time.Time) error {
 	record, err := auditdomain.NewRecord(command.StoreID, auditdomain.ActorUser, command.ActorID.String(), action, "shipment", row.ShipmentID, command.RequestID, now)
 	if err != nil {
 		return err
@@ -197,7 +199,11 @@ func (repository *Repository) appendShipmentEffects(ctx context.Context, tx *gor
 	if err != nil {
 		return err
 	}
-	event, err := eventdomain.New(command.StoreID, eventID, eventType, "shipment", row.ShipmentID, row.Version, now, command.RequestID, map[string]any{"store_id": command.StoreID.String(), "order_id": row.OrderID, "shipment_id": row.ShipmentID, "state": row.State})
+	aggregateType, aggregateID, aggregateVersion := "shipment", row.ShipmentID, row.Version
+	if eventType == "order.shipped.v1" || eventType == "order.completed.v1" {
+		aggregateType, aggregateID, aggregateVersion = "order", row.OrderID, orderVersion
+	}
+	event, err := eventdomain.New(command.StoreID, eventID, eventType, aggregateType, aggregateID, aggregateVersion, now, command.RequestID, map[string]any{"store_id": command.StoreID.String(), "order_id": row.OrderID, "shipment_id": row.ShipmentID, "state": row.State})
 	if err != nil {
 		return err
 	}
