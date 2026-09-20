@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	auditdomain "github.com/ah2909/e-commerce/internal/audit/domain"
+	eventdomain "github.com/ah2909/e-commerce/internal/eventing/domain"
+	ordersdomain "github.com/ah2909/e-commerce/internal/orders/domain"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/shared/money"
 	"github.com/ah2909/e-commerce/internal/shipping/application"
@@ -14,9 +17,40 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type Repository struct{ db *gorm.DB }
+type FulfillmentOrders interface {
+	LockFulfillmentOrderInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (application.OrderLock, error)
+	TransitionFulfillmentInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID, int64, ordersdomain.State, ordersdomain.State, time.Time, string) (int64, error)
+	GetFulfillmentOrder(context.Context, ids.StoreID, ids.OrderID) (ordersdomain.Order, error)
+	ListFulfillmentOrders(context.Context, ids.StoreID, ordersdomain.State, int, string) ([]ordersdomain.Order, string, error)
+}
+
+type FulfillmentAuthorizer interface {
+	HasPermissionInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.UserID, string) (bool, error)
+}
+
+type FulfillmentAudit interface {
+	Insert(context.Context, *gorm.DB, auditdomain.Record) error
+}
+
+type FulfillmentEvents interface {
+	Append(context.Context, *gorm.DB, eventdomain.Event) error
+}
+
+type Repository struct {
+	db               *gorm.DB
+	orders           FulfillmentOrders
+	authorize        FulfillmentAuthorizer
+	audit            FulfillmentAudit
+	events           FulfillmentEvents
+	shipmentsEnabled bool
+}
 
 func NewRepository(db *gorm.DB) *Repository { return &Repository{db: db} }
+
+func (repository *Repository) WithFulfillment(orders FulfillmentOrders, authorize FulfillmentAuthorizer, audit FulfillmentAudit, events FulfillmentEvents) *Repository {
+	repository.orders, repository.authorize, repository.audit, repository.events, repository.shipmentsEnabled = orders, authorize, audit, events, true
+	return repository
+}
 
 type ruleRow struct {
 	StoreID        string     `gorm:"column:store_id"`
@@ -39,6 +73,19 @@ func (repository *Repository) Get(ctx context.Context, storeID ids.StoreID) (dom
 
 func (repository *Repository) QuoteInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID) (domain.Rule, error) {
 	return load(tx.WithContext(ctx), storeID, true)
+}
+
+func (repository *Repository) GetShipmentByOrderInTransaction(ctx context.Context, tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID) (domain.Shipment, bool, error) {
+	if !repository.shipmentsEnabled {
+		return domain.Shipment{}, false, nil
+	}
+	var row shipmentRow
+	if err := tx.WithContext(ctx).Where("store_id=? AND order_id=?", storeID.String(), orderID.String()).Take(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return domain.Shipment{}, false, nil
+	} else if err != nil {
+		return domain.Shipment{}, false, err
+	}
+	return mapShipment(row), true, nil
 }
 
 func (repository *Repository) Replace(ctx context.Context, storeID ids.StoreID, id ids.ShippingRuleID, expected int64, draft domain.Draft) (domain.Rule, error) {

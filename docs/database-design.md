@@ -191,8 +191,11 @@ Migration 8 implements versioned encrypted VietQR configuration, encrypted attem
 | --- | --- | --- |
 | `shipping_rules` | Versioned free/flat quote rule | PK `(store_id,shipping_rule_id)`; one current active rule |
 | `shipments` | Manual carrier/tracking lifecycle | PK `(store_id,shipment_id)`; tenant order FK; order/status index |
+| `shipment_commands` | Idempotent fulfillment mutation result | PK `(store_id,idempotency_key)`; tenant shipment/order FKs; request fingerprint |
 
 Order shipping snapshots do not depend on the current rule. Tracking numbers are identifiers, not secrets or access credentials.
+
+Migration 11 adds one tenant shipment per order, immutable command-result snapshots, carrier/tracking uniqueness within a store, `order.fulfill`, and fulfillment audit actions. It does not rewrite existing order or payment data.
 
 ### Audit
 
@@ -226,6 +229,10 @@ Payments coordinates one PostgreSQL transaction for validated webhook success or
 ### Cancellation and refund
 
 Eligibility and order version are locked before transition. Unpaid cancellation and reservation release are atomic. Paid cancellation creates one full-refund record; provider work occurs after commit and later applies one durable result. Financial state is not marked refunded before settlement evidence. Successful settlement locks order, payment, refund, and ordered stock rows, then atomically records refund/payment completion, exact snapshot-based restock ledgers, terminal order history, audit, and outbox facts.
+
+### Fulfillment
+
+Fulfillment locks the tenant order before its shipment and rechecks order, payment, shipment, expected version, active store, membership, and `order.fulfill`. Preparation, correction, dispatch, and completion bind a store-scoped idempotency key to a request fingerprint and result snapshot. Each command commits shipment state, matching order transition/history where applicable, audit, command result, and outbox fact together.
 
 ## Query and index policy
 

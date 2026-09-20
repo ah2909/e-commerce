@@ -47,6 +47,7 @@ type Customers interface {
 
 type Shipping interface {
 	QuoteInTransaction(context.Context, *gorm.DB, ids.StoreID) (shippingdomain.Rule, error)
+	GetShipmentByOrderInTransaction(context.Context, *gorm.DB, ids.StoreID, ids.OrderID) (shippingdomain.Shipment, bool, error)
 }
 
 type Inventory interface {
@@ -535,8 +536,16 @@ func (repository *Repository) appendEvent(ctx context.Context, tx *gorm.DB, stor
 }
 
 func (repository *Repository) load(tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID) (domain.Order, error) {
+	return repository.loadMatching(tx, storeID, orderID, nil)
+}
+
+func (repository *Repository) loadMatching(tx *gorm.DB, storeID ids.StoreID, orderID ids.OrderID, states []string) (domain.Order, error) {
 	var row orderRow
-	if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("store_id=? AND order_id=?", storeID, orderID).First(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+	query := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("store_id=? AND order_id=?", storeID, orderID)
+	if len(states) > 0 {
+		query = query.Where("state IN ?", states)
+	}
+	if err := query.First(&row).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.Order{}, application.ErrNotFound
 	} else if err != nil {
 		return domain.Order{}, err
@@ -553,10 +562,14 @@ func (repository *Repository) load(tx *gorm.DB, storeID ids.StoreID, orderID ids
 	if err != nil {
 		return domain.Order{}, err
 	}
-	return mapOrder(row, rawLines, rawAddress, payment)
+	shipment, found, err := repository.shipping.GetShipmentByOrderInTransaction(tx.Statement.Context, tx, storeID, orderID)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	return mapOrder(row, rawLines, rawAddress, payment, shipment, found)
 }
 
-func mapOrder(row orderRow, rows []lineRow, address addressRow, payment paymentsdomain.Payment) (domain.Order, error) {
+func mapOrder(row orderRow, rows []lineRow, address addressRow, payment paymentsdomain.Payment, shipment shippingdomain.Shipment, shipmentFound bool) (domain.Order, error) {
 	owner := domain.Owner{Kind: domain.OwnerKind(row.OwnerKind)}
 	if row.UserID != nil {
 		owner.UserID = ids.UserID(*row.UserID)
@@ -589,7 +602,11 @@ func mapOrder(row orderRow, rows []lineRow, address addressRow, payment payments
 		total, _ := money.New(value.LineTotalMinor, value.Currency)
 		lines[i] = domain.Line{ID: ids.OrderLineID(value.LineID), VariantID: ids.VariantID(value.VariantID), ProductName: value.ProductName, SKU: value.SKU, OptionValues: options, Quantity: value.Quantity, UnitPrice: unit, LineTotal: total, TaxPresentation: value.TaxPresentation}
 	}
-	return domain.Order{StoreID: ids.StoreID(row.StoreID), ID: ids.OrderID(row.OrderID), Number: row.OrderNumber, Owner: owner, CartID: ids.CartID(row.CartID), Currency: row.Currency, Subtotal: subtotal, ShippingTotal: shippingPrice, GrandTotal: grand, TaxPresentation: row.TaxPresentation, Contact: domain.Contact{Name: row.ContactName, Email: row.ContactEmail, Phone: row.ContactPhone}, DeliveryAddress: domain.Address{RecipientName: address.RecipientName, Phone: address.Phone, Line1: address.Line1, Line2: address.Line2, Ward: address.Ward, District: address.District, Province: address.Province, PostalCode: address.PostalCode, CountryCode: address.CountryCode}, Shipping: domain.ShippingSnapshot{RuleID: ids.ShippingRuleID(row.ShippingRuleID), RuleVersion: row.ShippingRuleVersion, Mode: row.ShippingMode, Price: shippingPrice}, State: domain.State(row.State), Version: row.Version, ReservationExpiresAt: row.ReservationExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ClosedAt: row.ClosedAt, Lines: lines, Payment: toOrderPayment(payment)}, nil
+	result := domain.Order{StoreID: ids.StoreID(row.StoreID), ID: ids.OrderID(row.OrderID), Number: row.OrderNumber, Owner: owner, CartID: ids.CartID(row.CartID), Currency: row.Currency, Subtotal: subtotal, ShippingTotal: shippingPrice, GrandTotal: grand, TaxPresentation: row.TaxPresentation, Contact: domain.Contact{Name: row.ContactName, Email: row.ContactEmail, Phone: row.ContactPhone}, DeliveryAddress: domain.Address{RecipientName: address.RecipientName, Phone: address.Phone, Line1: address.Line1, Line2: address.Line2, Ward: address.Ward, District: address.District, Province: address.Province, PostalCode: address.PostalCode, CountryCode: address.CountryCode}, Shipping: domain.ShippingSnapshot{RuleID: ids.ShippingRuleID(row.ShippingRuleID), RuleVersion: row.ShippingRuleVersion, Mode: row.ShippingMode, Price: shippingPrice}, State: domain.State(row.State), Version: row.Version, ReservationExpiresAt: row.ReservationExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ClosedAt: row.ClosedAt, Lines: lines, Payment: toOrderPayment(payment)}
+	if shipmentFound {
+		result.Shipment = &domain.Shipment{ID: shipment.ID, OrderID: shipment.OrderID, State: string(shipment.State), Carrier: shipment.Carrier, TrackingNumber: shipment.TrackingNumber, Version: shipment.Version, CreatedAt: shipment.CreatedAt, UpdatedAt: shipment.UpdatedAt, ShippedAt: shipment.ShippedAt, CompletedAt: shipment.CompletedAt}
+	}
+	return result, nil
 }
 
 func toOrderPayment(value paymentsdomain.Payment) domain.Payment {

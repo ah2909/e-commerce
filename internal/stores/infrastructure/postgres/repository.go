@@ -276,7 +276,7 @@ func (repository *Repository) HasPermissionInTransaction(ctx context.Context, tx
 	if role.Allows(requested) {
 		return true, nil
 	}
-	if role != domain.RoleStaff || (requested != domain.PermissionPaymentConfirm && requested != domain.PermissionPaymentReconcile && requested != domain.PermissionOrderCancel && requested != domain.PermissionPaymentRefund) {
+	if role != domain.RoleStaff || (requested != domain.PermissionPaymentConfirm && requested != domain.PermissionPaymentReconcile && requested != domain.PermissionOrderCancel && requested != domain.PermissionPaymentRefund && requested != domain.PermissionOrderFulfill) {
 		return false, nil
 	}
 	var count int64

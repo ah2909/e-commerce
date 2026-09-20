@@ -84,6 +84,19 @@ type Payment struct {
 	Version  int64         `json:"version"`
 }
 
+type Shipment struct {
+	ID             ids.ShipmentID `json:"shipment_id"`
+	OrderID        ids.OrderID    `json:"order_id"`
+	State          string         `json:"state"`
+	Carrier        string         `json:"carrier"`
+	TrackingNumber string         `json:"tracking_number"`
+	Version        int64          `json:"version"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	ShippedAt      *time.Time     `json:"shipped_at"`
+	CompletedAt    *time.Time     `json:"completed_at"`
+}
+
 type Order struct {
 	StoreID              ids.StoreID      `json:"-"`
 	ID                   ids.OrderID      `json:"order_id"`
@@ -106,6 +119,7 @@ type Order struct {
 	ClosedAt             *time.Time       `json:"closed_at"`
 	Lines                []Line           `json:"lines"`
 	Payment              Payment          `json:"payment"`
+	Shipment             *Shipment        `json:"shipment"`
 }
 
 func UserOwner(userID ids.UserID) Owner    { return Owner{Kind: OwnerUser, UserID: userID} }

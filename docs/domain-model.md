@@ -229,13 +229,15 @@ Rules:
 
 ## Shipping
 
-A shipping rule provides free or flat-rate VND shipping. A shipment records order, status, carrier name, tracking number, and timestamps. Staff enter carrier and tracking information manually.
+A shipping rule provides free or flat-rate VND shipping. A shipment records order, status, carrier name, tracking number, optimistic version, and timestamps. Staff with `order.fulfill` enter carrier and tracking information manually.
 
 Rules:
 
 - The checkout shipping charge and delivery address are snapshotted on the order.
 - A shipment belongs to one order and store.
+- MVP permits exactly one shipment per order with `processing -> shipped -> completed`; partial or split fulfillment is deferred.
 - Shipment cannot be marked shipped from a cancelled, expired, or unpaid order.
+- Shipment and order transitions, history, audit, idempotency result, and outbox fact commit atomically under the order-first lock policy.
 - Automated carrier quotations, labels, and callbacks are outside the MVP.
 
 ## Audit

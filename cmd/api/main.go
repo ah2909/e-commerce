@@ -202,6 +202,11 @@ func run() error {
 				shippingService := shippingapplication.NewService(shippingRepository)
 				shippinghttp.NewHandler(shippingService, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
 				orderRepository := orderspostgres.NewRepository(connection.GORM, cartRepository, catalogRepository, pricingRepository, customerRepository, shippingRepository, inventoryRepository, paymentspostgres.NewParticipant(eventingpostgres.NewWriter()), eventingpostgres.NewWriter()).WithCancellation(auditpostgres.NewWriter(), storeRepository)
+				if fulfillmentAvailable(schemaVersion) {
+					shippingRepository.WithFulfillment(orderRepository, storeRepository, auditpostgres.NewWriter(), eventingpostgres.NewWriter())
+					fulfillmentService := shippingapplication.NewFulfillmentService(shippingRepository)
+					shippinghttp.NewFulfillmentHandler(fulfillmentService, identityHandler.AuthenticateUser(), tenantMiddleware, storeRepository, logger, cfg.DependencyTimeout).Register(engine, hostMiddleware)
+				}
 				orderService := ordersapplication.NewService(orderRepository)
 				orderHandler := ordershttp.NewHandler(orderService, identityService, identityHandler.AuthenticateShopper(), logger, cfg.DependencyTimeout)
 				if refundsAvailable(schemaVersion) {
@@ -258,14 +263,15 @@ func run() error {
 	return nil
 }
 
-func catalogAvailable(schemaVersion int64) bool   { return schemaVersion >= 3 }
-func pricingAvailable(schemaVersion int64) bool   { return schemaVersion >= 4 }
-func inventoryAvailable(schemaVersion int64) bool { return schemaVersion >= 5 }
-func customersAvailable(schemaVersion int64) bool { return schemaVersion >= 6 }
-func ordersAvailable(schemaVersion int64) bool    { return schemaVersion >= 7 }
-func paymentsAvailable(schemaVersion int64) bool  { return schemaVersion >= 8 }
-func momoAvailable(schemaVersion int64) bool      { return schemaVersion >= 9 }
-func refundsAvailable(schemaVersion int64) bool   { return schemaVersion >= 10 }
+func catalogAvailable(schemaVersion int64) bool     { return schemaVersion >= 3 }
+func pricingAvailable(schemaVersion int64) bool     { return schemaVersion >= 4 }
+func inventoryAvailable(schemaVersion int64) bool   { return schemaVersion >= 5 }
+func customersAvailable(schemaVersion int64) bool   { return schemaVersion >= 6 }
+func ordersAvailable(schemaVersion int64) bool      { return schemaVersion >= 7 }
+func paymentsAvailable(schemaVersion int64) bool    { return schemaVersion >= 8 }
+func momoAvailable(schemaVersion int64) bool        { return schemaVersion >= 9 }
+func refundsAvailable(schemaVersion int64) bool     { return schemaVersion >= 10 }
+func fulfillmentAvailable(schemaVersion int64) bool { return schemaVersion >= 11 }
 
 func apiWriteTimeout(dependencyTimeout time.Duration) time.Duration {
 	return max(15*time.Second, dependencyTimeout+5*time.Second)

@@ -71,3 +71,12 @@ func TestCheckoutAndOrderRoutesRequireSchemaSeven(t *testing.T) {
 		t.Fatal("Checkout and Order routes were unavailable at migration 7")
 	}
 }
+
+func TestFulfillmentRoutesRequireSchemaEleven(t *testing.T) {
+	if fulfillmentAvailable(10) {
+		t.Fatal("Fulfillment routes were available before migration 11")
+	}
+	if !fulfillmentAvailable(11) {
+		t.Fatal("Fulfillment routes were unavailable at migration 11")
+	}
+}

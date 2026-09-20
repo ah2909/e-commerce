@@ -70,8 +70,10 @@ The checkout transaction persists the order and reservation state directly throu
 | `order.paid.v1` | Orders | Fulfillment, email, analytics | store, order, payment |
 | `order.cancellation_requested.v1` | Orders | Payments, operations | store, order, reason, actor type |
 | `order.cancelled.v1` | Orders | Email, analytics | store, order, reason |
+| `shipment.prepared.v1` | Shipping | Operations | store, order, shipment, state |
+| `shipment.updated.v1` | Shipping | Operations | store, order, shipment, state |
 | `order.shipped.v1` | Shipping | Orders, email | store, order, shipment |
-| `order.completed.v1` | Orders | Email, analytics | store, order |
+| `order.completed.v1` | Shipping | Email, analytics | store, order, shipment |
 
 Email consumers receive a purpose-limited contact snapshot or retrieve it through an explicit Orders interface. General analytics events avoid delivery addresses, phone numbers, and email where identifiers suffice.
 

@@ -148,6 +148,10 @@ The expiry worker discovers a bounded set of candidate order IDs without retaini
 
 An unpaid order may be cancelled by its customer/guest or authorized staff, releasing active inventory once. Staff may cancel before fulfillment. Cancelling a paid order creates a full-refund request; payment remains paid until the refund succeeds or is externally confirmed. MoMo refund operations are idempotent provider calls. VietQR refunds are manually settled and then recorded with actor, reason, external reference, and timestamp.
 
+### Simple fulfillment
+
+Shipping coordinates a single manual shipment per paid order. Each mutation locks the order before the shipment, revalidates the active workforce permission in the transaction, and atomically records shipment state, the matching Orders transition/history, audit, idempotency result, and outbox fact. Shipment preparation moves `paid` to `processing`, dispatch moves both aggregates to `shipped`, and manual completion moves both to terminal `completed`. Carrier integration and partial fulfillment remain outside the MVP.
+
 ## Event delivery
 
 - The producing module writes an outbox row in the same transaction as its aggregate change.

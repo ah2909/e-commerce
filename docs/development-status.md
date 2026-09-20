@@ -2,8 +2,8 @@
 
 ## Snapshot
 
-- Assessed: 2026-09-14
-- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, 014, and 016
+- Assessed: 2026-09-20
+- Implemented baseline: commit `5bfd212a8c39e24ed976aebc47f4321aec94255c`, plus accepted tasks 007, 008, 009, 010, 011, 012, 013, 014, 016, and 017
 - Target baseline: [product requirements](product-requirements.md), [system architecture](architecture.md), [domain model](domain-model.md), and [database design](database-design.md)
 - Current release verdict: **not production-ready**
 
@@ -28,6 +28,8 @@ Accepted [task 014](../tasks/archive/014-vietqr-payments.md) implements encrypte
 [Task 015](../tasks/015-momo-payments.md) implements encrypted tenant MoMo configuration, bounded signed provider requests, idempotent attempts, raw-body signed IPNs, atomic automatic settlement, and reconciliation. Independent architecture/security reviews and the complete automated verification gate pass; live MoMo sandbox acceptance remains pending external credentials and a reachable HTTPS callback.
 
 Accepted [task 016](../tasks/archive/016-cancellation-full-refunds.md) implements tenant-safe unpaid cancellation, workforce full-refund requests, MoMo refund/query execution, audited VietQR settlement, and atomic refund restock. Both independent reviews and final verification passed.
+
+Accepted [task 017](../tasks/archive/017-simple-fulfillment.md) implements a tenant-safe single-shipment lifecycle, explicit workforce fulfillment permission, admin fulfillment reads, shopper tracking projection, and atomic processing/shipped/completed transitions. Both independent reviews and final verification passed.
 
 ## Status meanings
 
@@ -55,7 +57,7 @@ Accepted [task 016](../tasks/archive/016-cancellation-full-refunds.md) implement
 | VietQR payments | Implemented and accepted | Accepted task 014 adds encrypted provider configuration, local QR instructions, audited manual confirmation, atomic settlement, staff payment permissions, and reconciliation. |
 | MoMo payments | Implemented, changes required | Task 015 passed independent reviews and complete automated verification; live sandbox initiation and signed callback delivery remain required before acceptance. |
 | Cancellation and refunds | Implemented and accepted | Accepted task 016 implements shopper/workforce cancellation, explicit permissions, provider-specific full-refund settlement, atomic restock, and tenant/concurrency/rollback evidence. |
-| Shipping and fulfillment | Partially implemented | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Shipment, carrier, tracking, and fulfillment transitions remain unimplemented. |
+| Shipping and fulfillment | Implemented and accepted | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Accepted task 017 adds manual one-shipment fulfillment, carrier/tracking, permissions, admin reads, atomic order/shipment transitions, and tenant/concurrency/rollback evidence. |
 | Event workers | Partially implemented | Task 009 adds Eventing-owned tenant-scoped outbox persistence and atomically appends `product.published.v1`. Kafka publishing, retries, inboxes, consumers, and dead-letter handling remain unimplemented. |
 | Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
 
@@ -121,7 +123,13 @@ Accepted [task 016](../tasks/archive/016-cancellation-full-refunds.md) implement
 - expanded payment, permission, audit, and inventory-ledger constraints for refund workflows
 - tenant-scoped idempotency/provider-reference uniqueness and operational refund-state indexes
 
-The schema intentionally does not include platform operators. It also does not include post-MVP coupons, shipments, or inbox tables.
+### Migration 00011
+
+- tenant-owned one-per-order shipments with processing, shipped, and completed lifecycle constraints
+- immutable fulfillment-command result snapshots and store-scoped idempotency fingerprints
+- explicit `order.fulfill` grants plus fulfillment audit actions and tenant carrier/tracking indexes
+
+The schema intentionally does not include platform operators. It also does not include post-MVP coupons or inbox tables.
 
 ## Current accepted risks and release blockers
 
@@ -145,11 +153,11 @@ These positives do not waive the blockers above.
 
 ## Public API status
 
-[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, Shipping-rule, Checkout, Order, VietQR, MoMo, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
+[api/openapi.json](../api/openapi.json) describes the current Identity, guest, store, membership, Catalog, Pricing, Inventory, Customer, Cart, Shipping-rule, Checkout, Order, Fulfillment, VietQR, MoMo, health, and onboarding endpoints. It remains an incremental implementation contract, not the complete MVP API.
 
 `POST /api/v1/onboarding/stores` is base-domain-only, requires `platformAdminBearer`, and returns store and owner identifiers without issuing an owner session. Task 008 adds authenticated owner/admin authoring routes under `/api/v1/admin/catalog`.
 
-Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Task 015 adds redacted MoMo configuration, shopper attempts, and the public signed-IPN route. Task 016 adds owned unpaid cancellation plus permissioned cancellation, refund reads, MoMo execution, and VietQR settlement. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, callback routing data, and foreign customer/cart/order/payment/refund data are not public. Post-MVP coupons, fulfillment, and event-administration endpoints remain absent.
+Task 009 adds owner/admin price-list administration and authenticated Catalog publication. Task 011 adds owner/admin exact stock reads and idempotent manual adjustments under `/api/v1/admin/inventory`, while unauthenticated Catalog list/detail responses expose a boolean `in_stock` value. Task 012 adds registered-customer profile/address routes and one current Cart surface for either a user or guest. Task 013 adds owner/admin shipping-rule configuration, shopper checkout, and user-or-order-grant authorized order reads. Task 014 adds redacted VietQR configuration, shopper instructions, permissioned confirmation, and reconciliation reads. Task 015 adds redacted MoMo configuration, shopper attempts, and the public signed-IPN route. Task 016 adds owned unpaid cancellation plus permissioned cancellation, refund reads, MoMo execution, and VietQR settlement. Task 017 adds permissioned fulfillment queues, detail, shipment preparation/correction, dispatch, completion, and protected shopper shipment projections. Exact inventory quantities, reservations, ledgers, normalized contacts, payment secrets, callback routing data, and foreign customer/cart/order/payment/refund/shipment data are not public. Post-MVP coupons and event-administration endpoints remain absent.
 
 ## Verification evidence
 
@@ -193,10 +201,13 @@ Task 014 final verification on 2026-09-14: both independent reviews passed after
 
 Task 016 final verification on 2026-09-17: both independent reviews passed after full-refund financial binding, refund-specific MoMo classification, serialized replay, settlement-time validation, provider-identity uniqueness, migration hardening, Gin boundary evidence, and expanded tenant, race, rollback, and schema-9 backfill tests. The complete `make verify` run passed formatting, zero-issue lint, all unit tests, all real integration tests at schema 10, and vulnerability scanning with no vulnerabilities in called or imported packages.
 
+Task 017 final verification on 2026-09-20: both independent reviews passed after command shipment/order binding, actionable-state read locking, nested shipment contract alignment, and expanded authorization, tenant, pagination, concurrency, migration, and rollback evidence. The complete `make verify` run passed zero-issue lint, all unit tests, all real integration tests at schema 11, and vulnerability scanning with no vulnerabilities in called or imported code.
+
 ## Required next work
 
-1. Implement shipping and fulfillment.
+1. Implement event workers and derived integrations.
+2. Complete operational hardening and production-readiness evidence.
 
-Shipping/fulfillment, event workers, and operational hardening remain before MVP production. Coupons and redemption accounting follow the MVP production gate.
+Event workers and operational hardening remain before MVP production. Coupons and redemption accounting follow the MVP production gate.
 
 No production deployment should proceed until at least the required MVP slices and operational hardening pass their gates.
