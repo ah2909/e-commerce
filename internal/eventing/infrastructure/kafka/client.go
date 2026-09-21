@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"time"
@@ -9,18 +10,31 @@ import (
 	eventapplication "github.com/ah2909/e-commerce/internal/eventing/application"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/sasl/plain"
 )
 
 type Producer struct{ client *kgo.Client }
 
+type Security struct {
+	TLS      bool
+	Username string
+	Password string
+}
+
 func NewProducer(brokers []string, timeout time.Duration) (*Producer, error) {
-	client, err := kgo.NewClient(
+	return NewProducerWithSecurity(brokers, timeout, Security{})
+}
+
+func NewProducerWithSecurity(brokers []string, timeout time.Duration, security Security) (*Producer, error) {
+	options := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.ProducerBatchMaxBytes(int32(eventapplication.MaxMessageBytes+4096)),
+		kgo.ProducerBatchMaxBytes(int32(eventapplication.MaxMessageBytes + 4096)),
 		kgo.ProduceRequestTimeout(timeout),
 		kgo.RecordRetries(3),
-	)
+	}
+	options = append(options, security.options()...)
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return nil, fmt.Errorf("initialize Kafka producer: %w", err)
 	}
@@ -51,23 +65,26 @@ type Processor interface {
 }
 
 type ConsumerSettings struct {
-	Brokers []string
-	Group   string
-	Topics  []string
-	Timeout time.Duration
+	Brokers  []string
+	Group    string
+	Topics   []string
+	Timeout  time.Duration
+	Security Security
 }
 
 func RunConsumer(ctx context.Context, settings ConsumerSettings, processor Processor) error {
-	client, err := kgo.NewClient(
+	options := []kgo.Opt{
 		kgo.SeedBrokers(settings.Brokers...),
 		kgo.ConsumerGroup(settings.Group),
 		kgo.ConsumeTopics(settings.Topics...),
 		kgo.DisableAutoCommit(),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		kgo.FetchMaxBytes(int32(eventapplication.MaxMessageBytes+4096)),
-		kgo.FetchMaxPartitionBytes(int32(eventapplication.MaxMessageBytes+4096)),
-	)
+		kgo.FetchMaxBytes(int32(eventapplication.MaxMessageBytes + 4096)),
+		kgo.FetchMaxPartitionBytes(int32(eventapplication.MaxMessageBytes + 4096)),
+	}
+	options = append(options, settings.Security.options()...)
+	client, err := kgo.NewClient(options...)
 	if err != nil {
 		return fmt.Errorf("initialize Kafka consumer %s: %w", settings.Group, err)
 	}
@@ -101,4 +118,15 @@ func RunConsumer(ctx context.Context, settings ConsumerSettings, processor Proce
 			return fmt.Errorf("process Kafka group %s: %w", settings.Group, processErr)
 		}
 	}
+}
+
+func (security Security) options() []kgo.Opt {
+	options := make([]kgo.Opt, 0, 2)
+	if security.TLS {
+		options = append(options, kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12}))
+	}
+	if security.Username != "" || security.Password != "" {
+		options = append(options, kgo.SASL(plain.Auth{User: security.Username, Pass: security.Password}.AsMechanism()))
+	}
+	return options
 }

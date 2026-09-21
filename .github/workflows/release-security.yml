@@ -1,0 +1,38 @@
+name: Release security evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/release-security.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Build immutable runtime image
+        run: docker build --pull --tag ecommerce-backend:verify .
+      - name: Generate SBOM
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft@sha256:f94e5d9fce1f2278491a8e3a63bd5f6ddb81fdfdbb8bf7a1637565c1d5344357 ecommerce-backend:verify --output cyclonedx-json > sbom.cdx.json
+      - name: Scan image
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy@sha256:086971aaf400beebd94e8300fd8ea623774419597169156cec56eec5b00dfb1e image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed ecommerce-backend:verify
+      - name: Scan repository secrets
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 detect --source=/repo --no-banner --config=/repo/.gitleaks.toml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-sbom
+          path: sbom.cdx.json
+          if-no-files-found: error

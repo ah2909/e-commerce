@@ -51,6 +51,7 @@ type CredentialRatePolicy struct {
 type Settings struct {
 	OperationTimeout time.Duration
 	TenantBaseDomain string
+	SingleStoreHost  string
 	AuthHost         string
 	Registration     CredentialRatePolicy
 	Login            CredentialRatePolicy
@@ -361,7 +362,7 @@ func (handler Handler) socialCallback(ctx *gin.Context) {
 		problem.Write(w, r, http.StatusServiceUnavailable, "social_login_unavailable", "Social login is temporarily unavailable.", map[string]any{"retryable": true})
 		return
 	}
-	target, err := socialRedirectTarget(subdomain, handler.settings.TenantBaseDomain, returnPath, exchange)
+	target, err := socialRedirectTargetHost(subdomain, handler.settings.TenantBaseDomain, handler.settings.SingleStoreHost, returnPath, exchange)
 	if err != nil {
 		problem.Write(w, r, http.StatusInternalServerError, "internal_error", "An internal error occurred.", nil)
 		return
@@ -621,14 +622,26 @@ func rateSecret(value string) string {
 	return hex.EncodeToString(digest[:])
 }
 func socialRedirectTarget(subdomain, baseDomain, returnPath, exchange string) (string, error) {
-	if _, ok := tenantSubdomainTarget(subdomain, baseDomain); !ok {
+	return socialRedirectTargetHost(subdomain, baseDomain, "", returnPath, exchange)
+}
+
+func socialRedirectTargetHost(subdomain, baseDomain, exactHost, returnPath, exchange string) (string, error) {
+	host, ok := tenantSubdomainTarget(subdomain, baseDomain)
+	if exactHost != "" {
+		parsed, err := url.Parse("https://" + exactHost)
+		if err != nil || parsed.Hostname() != exactHost || parsed.Port() != "" || strings.ContainsAny(exactHost, "/:@?#") {
+			return "", errors.New("invalid social redirect host")
+		}
+		host, ok = exactHost, true
+	}
+	if !ok {
 		return "", errors.New("invalid social redirect host")
 	}
 	parsed, err := url.Parse(returnPath)
 	if err != nil || !strings.HasPrefix(returnPath, "/") || strings.HasPrefix(returnPath, "//") || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" {
 		return "", errors.New("invalid social return path")
 	}
-	target := &url.URL{Scheme: "https", Host: subdomain + "." + baseDomain, Path: parsed.Path, RawPath: parsed.RawPath, RawQuery: parsed.RawQuery}
+	target := &url.URL{Scheme: "https", Host: host, Path: parsed.Path, RawPath: parsed.RawPath, RawQuery: parsed.RawQuery}
 	query := target.Query()
 	if exchange == "" {
 		query.Set("linked", "true")

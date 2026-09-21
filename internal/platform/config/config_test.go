@@ -122,6 +122,28 @@ func TestLoadFromDefaults(t *testing.T) {
 	if got.MoMoAPIBaseURL != "https://test-payment.momo.vn" || got.MoMoRequestTimeout != defaultMoMoRequestTimeout {
 		t.Fatalf("LoadFrom() MoMo defaults = %#v", got)
 	}
+	if got.RoutingMode != RoutingMultiStore || got.PlatformHost != got.TenantBaseDomain || got.SingleStoreID != "" {
+		t.Fatalf("LoadFrom() routing defaults = %#v", got)
+	}
+	if got.DatabaseMaxOpen != defaultDBMaxOpen || got.DatabaseMaxIdle != defaultDBMaxIdle || got.DatabaseStatementTimeout != defaultDBStatementTimeout {
+		t.Fatalf("LoadFrom() database defaults = %#v", got)
+	}
+}
+
+func TestLoadFromSingleStoreRouting(t *testing.T) {
+	values := validEnvironment()
+	values["TENANT_ROUTING_MODE"] = "single_store"
+	values["PLATFORM_HOST"] = "platform.example.test"
+	values["AUTH_HOST"] = "auth.platform.example.test"
+	values["SINGLE_STORE_HOST"] = "shop.customer.example"
+	values["SINGLE_STORE_ID"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	got, err := LoadFrom(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RoutingMode != RoutingSingleStore || got.SingleStoreHost != "shop.customer.example" || got.SingleStoreID.String() != values["SINGLE_STORE_ID"] {
+		t.Fatalf("routing = %#v", got)
+	}
 }
 
 func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
@@ -146,6 +168,7 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "out of range Redis port", key: "REDIS_ADDRESS", value: "localhost:70000", want: "REDIS_ADDRESS"},
 		{name: "invalid kafka", key: "KAFKA_BROKERS", value: "localhost", want: "KAFKA_BROKERS"},
 		{name: "invalid log level", key: "LOG_LEVEL", value: "verbose", want: "LOG_LEVEL"},
+		{name: "invalid environment", key: "APP_ENV", value: "prod", want: "APP_ENV"},
 		{name: "zero shutdown", key: "SHUTDOWN_TIMEOUT", value: "0s", want: "SHUTDOWN_TIMEOUT"},
 		{name: "large dependency timeout", key: "DEPENDENCY_TIMEOUT", value: "31s", want: "DEPENDENCY_TIMEOUT"},
 		{name: "large tenant resolution timeout", key: "TENANT_RESOLUTION_TIMEOUT", value: "6s", want: "TENANT_RESOLUTION_TIMEOUT"},
@@ -157,6 +180,12 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 		{name: "large rate window", key: "TOKEN_RATE_WINDOW", value: "25h", want: "TOKEN_RATE_WINDOW"},
 		{name: "invalid tenant base", key: "TENANT_BASE_DOMAIN", value: "bad_domain", want: "AUTH_HOST"},
 		{name: "mismatched auth host", key: "AUTH_HOST", value: "login.example.test", want: "AUTH_HOST"},
+		{name: "invalid routing mode", key: "TENANT_ROUTING_MODE", value: "caller", want: "TENANT_ROUTING_MODE"},
+		{name: "single values in multi mode", key: "SINGLE_STORE_HOST", value: "shop.customer.example", want: "only valid"},
+		{name: "idle above open", key: "DATABASE_MAX_IDLE", value: "21", want: "DATABASE_MAX_IDLE"},
+		{name: "database pool leaves no payment writer capacity", key: "DATABASE_MAX_OPEN", value: "1", want: "DATABASE_MAX_OPEN"},
+		{name: "lock above statement", key: "DATABASE_LOCK_TIMEOUT", value: "15s", want: "DATABASE_LOCK_TIMEOUT"},
+		{name: "invalid metrics address", key: "METRICS_ADDRESS", value: "localhost", want: "METRICS_ADDRESS"},
 		{name: "partial Google", key: "GOOGLE_CLIENT_ID", value: "client", want: "GOOGLE"},
 		{name: "wrong Google callback path", key: "GOOGLE_REDIRECT_URL", value: "https://auth.example.test/wrong", want: "exact AUTH_HOST callback"},
 		{name: "Google callback query", key: "GOOGLE_REDIRECT_URL", value: "https://auth.example.test/api/v1/auth/social/google/callback?next=x", want: "exact AUTH_HOST callback"},
@@ -186,8 +215,7 @@ func TestLoadFromRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestLoadFromProductionRequiresExplicitPlatformToken(t *testing.T) {
-	values := validEnvironment()
-	values["APP_ENV"] = "production"
+	values := productionEnvironment()
 	delete(values, "PLATFORM_ADMIN_TOKEN")
 	_, err := LoadFrom(mapLookup(values))
 	if err == nil || !strings.Contains(err.Error(), "PLATFORM_ADMIN_TOKEN is required") {
@@ -196,8 +224,7 @@ func TestLoadFromProductionRequiresExplicitPlatformToken(t *testing.T) {
 }
 
 func TestLoadFromProductionRejectsDevelopmentPaymentKey(t *testing.T) {
-	values := validEnvironment()
-	values["APP_ENV"] = "production"
+	values := productionEnvironment()
 	values["PAYMENT_CONFIG_KEYS"] = "1:" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "1"
 	_, err := LoadFrom(mapLookup(values))
@@ -207,12 +234,62 @@ func TestLoadFromProductionRejectsDevelopmentPaymentKey(t *testing.T) {
 }
 
 func TestLoadFromProductionRejectsMoMoSandbox(t *testing.T) {
-	values := validEnvironment()
-	values["APP_ENV"] = "production"
+	values := productionEnvironment()
 	values["MOMO_API_BASE_URL"] = "https://test-payment.momo.vn"
 	_, err := LoadFrom(mapLookup(values))
 	if err == nil || !strings.Contains(err.Error(), "production MoMo origin") {
 		t.Fatalf("LoadFrom() error = %v", err)
+	}
+}
+
+func TestLoadFromProductionRejectsDevelopmentPlatformToken(t *testing.T) {
+	values := productionEnvironment()
+	values["PLATFORM_ADMIN_TOKEN"] = "ZGV2LXBsYXRmb3JtLWFkbWluLXRva2VuLTAwMDAwMDA"
+	_, err := LoadFrom(mapLookup(values))
+	if err == nil || !strings.Contains(err.Error(), "development value") {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+}
+
+func TestLoadFromAcceptsHardenedProductionConfiguration(t *testing.T) {
+	got, err := LoadFrom(mapLookup(productionEnvironment()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.RedisTLSEnabled || !got.KafkaTLSEnabled || got.KafkaSASLPassword == "" || got.OTLPTraceEndpoint == "" {
+		t.Fatal("production transport configuration was not retained")
+	}
+}
+
+func TestLoadFromRejectsInsecureProductionConfiguration(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		want  string
+	}{
+		{name: "database TLS", key: "DATABASE_URL", value: "postgres://service@db.internal:5432/ecommerce?sslmode=prefer", want: "DATABASE_URL must use sslmode=verify-full"},
+		{name: "database identity verification", key: "DATABASE_URL", value: "postgres://service@db.internal:5432/ecommerce?sslmode=require", want: "DATABASE_URL must use sslmode=verify-full"},
+		{name: "metrics listener", key: "METRICS_ADDRESS", value: "", want: "METRICS_ADDRESS is required"},
+		{name: "trace TLS", key: "OTEL_EXPORTER_OTLP_ENDPOINT", value: "http://otel.internal:4318", want: "must use HTTPS"},
+		{name: "Redis TLS", key: "REDIS_TLS_ENABLED", value: "false", want: "REDIS_TLS_ENABLED"},
+		{name: "Kafka TLS", key: "KAFKA_TLS_ENABLED", value: "false", want: "kafka TLS and SASL"},
+		{name: "Kafka SASL", key: "KAFKA_SASL_USERNAME", value: "", want: "configured together"},
+		{name: "public host", key: "TENANT_BASE_DOMAIN", value: "example.test", want: "public deployment hostname"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := productionEnvironment()
+			values[test.key] = test.value
+			if test.key == "TENANT_BASE_DOMAIN" {
+				values["PLATFORM_HOST"] = test.value
+				values["AUTH_HOST"] = "auth." + test.value
+			}
+			_, err := LoadFrom(mapLookup(values))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("LoadFrom() error = %v, want containing %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -225,6 +302,30 @@ func validEnvironment() map[string]string {
 		"AUTH_HOST":            "auth.example.test",
 		"PLATFORM_ADMIN_TOKEN": base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)),
 	}
+}
+
+func productionEnvironment() map[string]string {
+	values := validEnvironment()
+	values["APP_ENV"] = "production"
+	values["DATABASE_URL"] = "postgres://service@db.internal:5432/ecommerce?sslmode=verify-full"
+	values["REDIS_ADDRESS"] = "redis.internal:6379"
+	values["REDIS_TLS_ENABLED"] = "true"
+	values["KAFKA_BROKERS"] = "kafka.internal:9093"
+	values["KAFKA_TLS_ENABLED"] = "true"
+	values["KAFKA_SASL_USERNAME"] = "service"
+	values["KAFKA_SASL_PASSWORD"] = "secret"
+	values["TENANT_BASE_DOMAIN"] = "commerce.example.com"
+	values["PLATFORM_HOST"] = "commerce.example.com"
+	values["AUTH_HOST"] = "auth.commerce.example.com"
+	values["METRICS_ADDRESS"] = ":9090"
+	values["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otel.internal:4318"
+	values["MOMO_API_BASE_URL"] = "https://payment.momo.vn"
+	values["MOMO_REDIRECT_URL"] = "https://shop.commerce.example.com/payments/momo/return"
+	values["MOMO_PUBLIC_URL"] = "https://commerce.example.com"
+	values["PLATFORM_ADMIN_TOKEN"] = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x53}, 32))
+	values["PAYMENT_CONFIG_KEYS"] = "1:" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x54}, 32))
+	values["PAYMENT_CONFIG_ACTIVE_KEY_VERSION"] = "1"
+	return values
 }
 
 func mapLookup(values map[string]string) LookupFunc {

@@ -176,7 +176,7 @@ Shipping coordinates a single manual shipment per paid order. Each mutation lock
 
 ## Availability and failure policy
 
-- Start with one region and a documented basic recovery target rather than claiming high availability not yet proven.
+- Start with one region and target 99.5% monthly API availability, PostgreSQL RPO at most 15 minutes, and service RTO at most four hours; selected-environment evidence is required before claiming them.
 - API liveness checks only process health. Readiness checks PostgreSQL and Redis dependencies needed for served routes; Kafka does not gate checkout readiness.
 - Every external request has connection and total deadlines and classifies retryable versus permanent errors.
 - Retries use bounded exponential backoff with jitter and a terminal dead-letter or reconciliation state.
@@ -190,6 +190,11 @@ Shipping coordinates a single manual shipment per paid order. Each mutation lock
 - Core metrics cover request latency/errors, database pool saturation, slow queries, checkout outcomes, reservation conflicts/expiry lag, payment and refund failures, reconciliation age, outbox age, consumer lag, and job retries.
 - Avoid unbounded `store_id` labels in global metrics. Use logs/traces or controlled top-tenant views for tenant-level diagnosis.
 - Alert on customer impact and backlog age, not only infrastructure utilization.
+- API and worker metrics use a separate internal listener. HTTP spans propagate W3C trace context and export through a bounded non-blocking OTLP/HTTP queue.
+
+## Deployment routing
+
+Shared deployments use store subdomains beneath one configured base domain. Customer-managed single-store deployments opt into one exact configured host mapped to one configured store ID. The direct request host, never a forwarded host or request payload, selects scope. Platform and authentication hosts remain distinct in either mode.
 
 ## Scaling path
 

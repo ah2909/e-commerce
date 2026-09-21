@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	eventapplication "github.com/ah2909/e-commerce/internal/eventing/application"
 	eventingkafka "github.com/ah2909/e-commerce/internal/eventing/infrastructure/kafka"
 	eventingpostgres "github.com/ah2909/e-commerce/internal/eventing/infrastructure/postgres"
+	"github.com/ah2909/e-commerce/internal/platform/config"
 	"github.com/ah2909/e-commerce/internal/platform/database"
 	"github.com/ah2909/e-commerce/internal/platform/logging"
 	"github.com/ah2909/e-commerce/internal/shared/ids"
@@ -30,14 +30,14 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool))
 	if len(args) < 1 {
 		return usage()
 	}
-	databaseURL, ok := lookup("DATABASE_URL")
-	if !ok || strings.TrimSpace(databaseURL) == "" {
-		return errors.New("DATABASE_URL is required")
+	cfg, err := config.LoadFrom(lookup)
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
 	}
 	logger := logging.New(os.Stdout, slog.LevelInfo)
 	operationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	connection, err := database.Open(operationCtx, databaseURL, logger, database.DefaultPoolSettings())
+	connection, err := database.Open(operationCtx, cfg.DatabaseURL, logger, database.PoolSettings{MaxOpenConnections: cfg.DatabaseMaxOpen, MaxIdleConnections: cfg.DatabaseMaxIdle, ConnectionLifetime: cfg.DatabaseConnectionLifetime, ConnectionIdleTime: cfg.DatabaseConnectionIdleTime, StatementTimeout: cfg.DatabaseStatementTimeout, LockTimeout: cfg.DatabaseLockTimeout, IdleTransaction: cfg.DatabaseIdleTransaction, SlowQueryThreshold: cfg.SlowQueryThreshold})
 	if err != nil {
 		return err
 	}
@@ -123,10 +123,6 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool))
 		if err != nil {
 			return err
 		}
-		brokers, err := brokerAddresses(lookup)
-		if err != nil {
-			return err
-		}
 		letter, err := delivery.LoadReplayable(operationCtx, storeID, deadLetterID)
 		if err != nil {
 			return err
@@ -135,7 +131,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool))
 		if err != nil {
 			return err
 		}
-		producer, err := eventingkafka.NewProducer(brokers, 10*time.Second)
+		producer, err := eventingkafka.NewProducerWithSecurity(cfg.KafkaBrokers, 10*time.Second, eventingkafka.Security{TLS: cfg.KafkaTLSEnabled, Username: cfg.KafkaSASLUsername, Password: cfg.KafkaSASLPassword})
 		if err != nil {
 			return err
 		}
@@ -144,9 +140,59 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool))
 			return err
 		}
 		return delivery.ResolveReplay(operationCtx, storeID, deadLetterID, args[3])
+	case "retention-status":
+		if len(args) != 4 {
+			return usage()
+		}
+		cutoffs, err := parseRetentionCutoffs(args[1:])
+		if err != nil {
+			return err
+		}
+		status, err := eventingpostgres.NewRetention(connection.GORM).Status(operationCtx, cutoffs)
+		if err != nil {
+			return err
+		}
+		logger.Info("event retention eligibility", "published_outbox", status.PublishedOutbox, "processed_inbox", status.ProcessedInbox, "resolved_dead_letters", status.ResolvedDeadLetters)
+		return nil
+	case "retention-clean":
+		if len(args) != 6 || args[5] != "delete-approved-retention" {
+			return usage()
+		}
+		if hold, _ := lookup("EVENT_RETENTION_HOLD"); strings.EqualFold(strings.TrimSpace(hold), "true") {
+			return errors.New("event retention is blocked by EVENT_RETENTION_HOLD")
+		}
+		cutoffs, err := parseRetentionCutoffs(args[1:4])
+		if err != nil {
+			return err
+		}
+		limit, err := strconv.Atoi(args[4])
+		if err != nil || limit < 1 || limit > 1000 {
+			return errors.New("retention batch must be between 1 and 1000")
+		}
+		result, err := eventingpostgres.NewRetention(connection.GORM).DeleteBatch(operationCtx, cutoffs, limit)
+		if err != nil {
+			return err
+		}
+		logger.Info("event retention batch completed", "published_outbox", result.PublishedOutbox, "processed_inbox", result.ProcessedInbox, "resolved_dead_letters", result.ResolvedDeadLetters)
+		return nil
 	default:
 		return usage()
 	}
+}
+
+func parseRetentionCutoffs(values []string) (eventingpostgres.RetentionCutoffs, error) {
+	if len(values) != 3 {
+		return eventingpostgres.RetentionCutoffs{}, errors.New("three retention cutoffs are required")
+	}
+	parsed := make([]time.Time, 3)
+	for index, value := range values {
+		cutoff, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return eventingpostgres.RetentionCutoffs{}, errors.New("retention cutoffs must be RFC 3339 timestamps")
+		}
+		parsed[index] = cutoff.UTC()
+	}
+	return eventingpostgres.RetentionCutoffs{PublishedBefore: parsed[0], ProcessedBefore: parsed[1], DeadLetterBefore: parsed[2]}, nil
 }
 
 func replayMessage(letter eventingpostgres.ReplayableDeadLetter, storeID ids.StoreID) (eventapplication.Message, error) {
@@ -178,21 +224,6 @@ func parseIDs(storeText, eventText string) (ids.StoreID, ids.EventID, error) {
 	return storeID, eventID, err
 }
 
-func brokerAddresses(lookup func(string) (string, bool)) ([]string, error) {
-	raw, ok := lookup("KAFKA_BROKERS")
-	if !ok || strings.TrimSpace(raw) == "" {
-		return nil, errors.New("KAFKA_BROKERS is required")
-	}
-	parts := strings.Split(raw, ",")
-	for index := range parts {
-		parts[index] = strings.TrimSpace(parts[index])
-		if _, _, err := net.SplitHostPort(parts[index]); err != nil {
-			return nil, errors.New("KAFKA_BROKERS contains an invalid address")
-		}
-	}
-	return parts, nil
-}
-
 func usage() error {
-	return fmt.Errorf("usage: event-reconcile status | list-outbox <store-id> <limit> | list-dead-letters <store-id|unscoped> <limit> | requeue-outbox <store-id> <event-id> <reason> | replay-dead-letter <store-id> <dead-letter-id> <reason>")
+	return fmt.Errorf("usage: event-reconcile status | list-outbox <store-id> <limit> | list-dead-letters <store-id|unscoped> <limit> | requeue-outbox <store-id> <event-id> <reason> | replay-dead-letter <store-id> <dead-letter-id> <reason> | retention-status <published-before> <processed-before> <resolved-before> | retention-clean <published-before> <processed-before> <resolved-before> <batch> delete-approved-retention")
 }

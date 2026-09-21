@@ -1,0 +1,68 @@
+groups:
+  - name: ecommerce-slo
+    rules:
+      - record: commerce:http_error_ratio_5m
+        expr: sum(rate(commerce_http_requests_total{status_class=~"5.."}[5m])) / clamp_min(sum(rate(commerce_http_requests_total[5m])), 1)
+      - alert: EcommerceAPIHighErrorRate
+        expr: commerce:http_error_ratio_5m > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: API error rate exceeds five percent
+      - alert: EcommerceAPILatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(commerce_http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: API p95 latency exceeds the launch target
+      - alert: EcommerceDatabasePoolSaturated
+        expr: commerce_database_connections{state="in_use"} / clamp_min(commerce_database_connections{state="open"}, 1) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Database pool is near saturation
+      - alert: EcommerceWorkerErrors
+        expr: increase(commerce_worker_operations_total{result="error"}[10m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Worker operations are repeatedly failing
+      - alert: EcommerceOutboxLate
+        expr: commerce_outbox_oldest_due_seconds > 60
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Publishable outbox work is older than 60 seconds
+      - alert: EcommerceOutboxTerminal
+        expr: commerce_outbox_records{state="terminal"} > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Outbox records require operator reconciliation
+      - alert: EcommerceDeadLettersOpen
+        expr: commerce_event_dead_letters{state="open"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Consumer dead letters require operator inspection
+      - alert: EcommerceDatabasePoolWaiting
+        expr: increase(commerce_database_wait_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Requests or workers are waiting for database connections
+      - alert: EcommerceTraceExporterDropping
+        expr: increase(commerce_trace_spans_dropped_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: The bounded trace queue is dropping spans

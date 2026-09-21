@@ -1,0 +1,66 @@
+name: ecommerce-production
+
+x-runtime: &runtime
+  image: ${APP_IMAGE:?set APP_IMAGE to an immutable image digest}
+  env_file:
+    - ${RUNTIME_ENV_FILE:-production.env}
+  environment:
+    DATABASE_URL: ${DATABASE_URL:?inject DATABASE_URL from the secret manager}
+    REDIS_ADDRESS: ${REDIS_ADDRESS:?inject REDIS_ADDRESS}
+    KAFKA_BROKERS: ${KAFKA_BROKERS:?inject KAFKA_BROKERS}
+    KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:?inject KAFKA_SASL_USERNAME}
+    KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:?inject KAFKA_SASL_PASSWORD from the secret manager}
+    PLATFORM_ADMIN_TOKEN: ${PLATFORM_ADMIN_TOKEN:?inject PLATFORM_ADMIN_TOKEN from the secret manager}
+    PAYMENT_CONFIG_KEYS: ${PAYMENT_CONFIG_KEYS:?inject PAYMENT_CONFIG_KEYS from the secret manager}
+    PAYMENT_CONFIG_ACTIVE_KEY_VERSION: ${PAYMENT_CONFIG_ACTIVE_KEY_VERSION:?inject PAYMENT_CONFIG_ACTIVE_KEY_VERSION}
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  stop_grace_period: 45s
+
+services:
+  migrate:
+    <<: *runtime
+    entrypoint: ["/migrate", "up"]
+    restart: "no"
+    profiles: ["migration"]
+
+  api:
+    <<: *runtime
+    entrypoint: ["/api"]
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  worker:
+    <<: *runtime
+    entrypoint: ["/worker"]
+    ports:
+      - "127.0.0.1:9091:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 128M

@@ -22,7 +22,7 @@ The included consumers are:
 
 ## Configuration
 
-`KAFKA_BROKERS` is a required comma-separated broker list. Event worker limits use:
+`KAFKA_BROKERS` is a required comma-separated broker list. Production also requires TLS and paired SASL credentials. Event worker limits use:
 
 | Variable | Default | Constraint |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ The included consumers are:
 | `EVENT_RETRY_BASE` | `1s` | positive, at most 1 minute |
 | `EVENT_RETRY_MAX` | `5m` | at least the base and at most 24 hours |
 
-Local Compose creates the five fixed topics with three partitions and one replica. Production topic replication, retention, authentication, authorization, and alert routing remain operational-hardening decisions.
+Local Compose creates the five fixed topics with three partitions and one replica. Production operators set replication and ACLs for the selected cluster and configure every event topic with a replay floor of 30 days.
 
 ## Failure and recovery
 
@@ -55,4 +55,4 @@ go run ./cmd/event-reconcile replay-dead-letter <store-id> <dead-letter-id> <rea
 
 `status` reports global due, delayed-retry, publisher-terminal, and consumer dead-letter counts plus the oldest currently due timestamp without tenant labels. Listings accept limits from 1 through 100, expose identifiers and redacted failure metadata only, and require a store ID for validated tenant records. The literal `unscoped` lists only malformed records whose tenant identity was not trusted. Requeue and replay refuse foreign, ambiguous, non-terminal, already-resolved, or malformed records. Reasons are normalized, bounded, and persisted.
 
-Retention is intentionally manual until operators approve Kafka/outbox/inbox replay windows. Do not delete outbox, inbox, dead-letter, or projection rows as an incident workaround.
+Published outbox and processed inbox rows have an approved 30-day window; resolved dead letters have a 90-day window. Unresolved/terminal rows are indefinite. Migration 13 adds the retention indexes. Use `retention-status` before the confirmation-gated `retention-clean`, keep `EVENT_RETENTION_HOLD=true` during incidents or restores, and follow [the operations runbook](operations-runbook.md). Never delete projections or unresolved rows as incident recovery.

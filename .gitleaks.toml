@@ -1,0 +1,15 @@
+title = "E-commerce fixture allowlist"
+
+[[allowlists]]
+description = "Deterministic non-production payment-test literals and the documented development-only platform token."
+condition = "AND"
+paths = [
+  '''^internal/payments/application/momo_test\.go$''',
+  '''^internal/payments/domain/payment_test\.go$''',
+  '''^internal/payments/infrastructure/momo/client_test\.go$''',
+  '''^\.env\.example$''',
+]
+regexes = [
+  '''SecretKey: "\s*(?:sandbox-|refund-|test-)?secret-key-123456789?\s*"''',
+  '''^PLATFORM_ADMIN_TOKEN=ZGV2LXBsYXRmb3JtLWFkbWluLXRva2VuLTAwMDAwMDA$''',
+]

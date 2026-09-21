@@ -37,3 +37,24 @@ func (useCase ResolveStore) Execute(ctx context.Context, subdomainValue string) 
 	}
 	return record, nil
 }
+
+func (useCase ResolveStore) ExecuteID(ctx context.Context, storeID ids.StoreID) (StoreRecord, error) {
+	if _, err := ids.ParseStoreID(storeID.String()); err != nil {
+		return StoreRecord{}, ErrStoreUnavailable
+	}
+	repository, ok := useCase.repository.(StoreIDResolverRepository)
+	if !ok {
+		return StoreRecord{}, errors.New("resolve store: ID lookup is unavailable")
+	}
+	record, found, err := repository.ResolveStoreByID(ctx, storeID)
+	if err != nil {
+		return StoreRecord{}, err
+	}
+	if !found || record.Status != domain.StoreStatusActive {
+		return StoreRecord{}, ErrStoreUnavailable
+	}
+	if record.StoreID != storeID {
+		return StoreRecord{}, fmt.Errorf("resolve store: repository returned mismatched store ID")
+	}
+	return record, nil
+}

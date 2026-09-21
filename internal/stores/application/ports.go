@@ -11,6 +11,10 @@ type StoreResolverRepository interface {
 	ResolveStoreBySubdomain(context.Context, domain.Subdomain) (StoreRecord, bool, error)
 }
 
+type StoreIDResolverRepository interface {
+	ResolveStoreByID(context.Context, ids.StoreID) (StoreRecord, bool, error)
+}
+
 type TenantRepository interface {
 	ResolveTenant(context.Context, ids.StoreID, ids.UserID) (TenantRecord, bool, error)
 }

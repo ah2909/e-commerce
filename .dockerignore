@@ -1,0 +1,6 @@
+.git
+.cache
+.tools
+.env
+*.log
+tasks

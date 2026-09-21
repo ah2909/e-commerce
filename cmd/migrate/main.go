@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ah2909/e-commerce/internal/platform/config"
 	"github.com/ah2909/e-commerce/internal/platform/databaseguard"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -44,9 +45,18 @@ func run(arguments []string, lookup func(string) (string, bool)) error {
 	if command != "up" && command != "status" && command != "reset" {
 		return errors.New("usage: migrate up|status|test-up|test-status|test-reset")
 	}
-	databaseURL, ok := lookup(databaseVariable)
-	if !ok || databaseURL == "" {
-		return fmt.Errorf("%s is required", databaseVariable)
+	var databaseURL string
+	if testConfig != nil {
+		databaseURL = value(lookup, databaseVariable)
+		if databaseURL == "" {
+			return fmt.Errorf("%s is required", databaseVariable)
+		}
+	} else {
+		cfg, err := config.LoadFrom(lookup)
+		if err != nil {
+			return fmt.Errorf("load configuration: %w", err)
+		}
+		databaseURL = cfg.DatabaseURL
 	}
 	var database *sql.DB
 	if testConfig != nil {

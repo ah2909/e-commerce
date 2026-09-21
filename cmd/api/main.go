@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -51,6 +52,7 @@ import (
 	"github.com/ah2909/e-commerce/internal/platform/health"
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/logging"
+	"github.com/ah2909/e-commerce/internal/platform/observability"
 	"github.com/ah2909/e-commerce/internal/platform/ratelimit"
 	"github.com/ah2909/e-commerce/internal/platform/redisstore"
 	"github.com/ah2909/e-commerce/internal/platform/tenant"
@@ -86,7 +88,7 @@ func run() error {
 
 	startupCtx, startupCancel := context.WithTimeout(ctx, cfg.DependencyTimeout)
 	defer startupCancel()
-	connection, err := database.Open(startupCtx, cfg.DatabaseURL, logger, database.DefaultPoolSettings())
+	connection, err := database.Open(startupCtx, cfg.DatabaseURL, logger, database.PoolSettings{MaxOpenConnections: cfg.DatabaseMaxOpen, MaxIdleConnections: cfg.DatabaseMaxIdle, ConnectionLifetime: cfg.DatabaseConnectionLifetime, ConnectionIdleTime: cfg.DatabaseConnectionIdleTime, StatementTimeout: cfg.DatabaseStatementTimeout, LockTimeout: cfg.DatabaseLockTimeout, IdleTransaction: cfg.DatabaseIdleTransaction, SlowQueryThreshold: cfg.SlowQueryThreshold})
 	if err != nil {
 		return err
 	}
@@ -100,7 +102,11 @@ func run() error {
 		return err
 	}
 
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddress})
+	redisOptions := &redis.Options{Addr: cfg.RedisAddress}
+	if cfg.RedisTLSEnabled {
+		redisOptions.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	redisClient := redis.NewClient(redisOptions)
 	defer func() {
 		if err := redisClient.Close(); err != nil {
 			logger.Warn("close Redis client", "error", err)
@@ -112,12 +118,19 @@ func run() error {
 		{Name: "redis", Check: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	}, cfg.DependencyTimeout)
 	engine := httpserver.NewEngine(logger)
+	metrics := observability.NewRegistry(connection.SQL)
+	traceExporter, err := observability.NewTraceExporter(ctx, cfg.OTLPTraceEndpoint, "ecommerce-api", logger)
+	if err != nil {
+		return fmt.Errorf("initialize trace exporter: %w", err)
+	}
+	metrics.SetTraceExporter(traceExporter)
+	engine.Use(metrics.Middleware())
 	engine.Use(httpserver.CORS(cfg.CORSAllowedOrigins))
 	engine.Use(clientaddr.New(cfg.TrustedProxyCIDRs).GinMiddleware())
 	healthHandler.Register(engine)
 	storeRepository := storespostgres.NewRepository(connection.GORM, auditpostgres.NewWriter())
 	identityRepository := identitypostgres.NewRepository(connection.GORM)
-	hostMiddleware := tenant.NewHostMiddleware(storesapplication.NewResolveStore(storeRepository), cfg.TenantBaseDomain, cfg.AuthHost, logger, cfg.TenantResolutionTimeout)
+	hostMiddleware := tenant.NewHostMiddlewareWithRouting(storesapplication.NewResolveStore(storeRepository), cfg.TenantBaseDomain, cfg.PlatformHost, cfg.AuthHost, cfg.SingleStoreHost, cfg.SingleStoreID, logger, cfg.TenantResolutionTimeout)
 	passwordHasher, err := identitypassword.NewArgon2ID(cfg.PasswordHashConcurrency)
 	if err != nil {
 		return fmt.Errorf("initialize password hasher: %w", err)
@@ -146,6 +159,7 @@ func run() error {
 	identitySettings := identityhttp.Settings{
 		OperationTimeout: cfg.DependencyTimeout,
 		TenantBaseDomain: cfg.TenantBaseDomain,
+		SingleStoreHost:  cfg.SingleStoreHost,
 		AuthHost:         cfg.AuthHost,
 		Registration:     identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.RegistrationRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.RegistrationRateLimit.IdentityMaximum), Window: cfg.RegistrationRateLimit.Window},
 		Login:            identityhttp.CredentialRatePolicy{PeerMaximum: int64(cfg.LoginRateLimit.PeerMaximum), IdentityMaximum: int64(cfg.LoginRateLimit.IdentityMaximum), Window: cfg.LoginRateLimit.Window},
@@ -219,6 +233,15 @@ func run() error {
 					if err != nil {
 						return fmt.Errorf("initialize payment configuration encryption: %w", err)
 					}
+					writerLock, err := database.HoldPaymentKeyWriterLock(ctx, connection.SQL, cfg.PaymentConfigActiveVersion)
+					if err != nil {
+						return err
+					}
+					defer func() {
+						if err := writerLock.Release(context.Background()); err != nil {
+							logger.Warn("release payment key writer lock", "error", err)
+						}
+					}()
 					paymentRepository := paymentspostgres.NewRepository(connection.GORM, keyring, paymentvietqr.Encoder{}, orderRepository, inventoryRepository, auditpostgres.NewWriter(), eventingpostgres.NewWriter(), storeRepository)
 					paymentService := paymentsapplication.NewService(paymentRepository)
 					paymentHandler := paymentshttp.NewHandler(paymentService, orderService, identityService, identityHandler.AuthenticateUser(), tenantMiddleware, storeRepository, logger, cfg.DependencyTimeout)
@@ -254,6 +277,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen on HTTP address: %w", err)
 	}
+	go func() {
+		if err := observability.Serve(ctx, cfg.MetricsAddress, metrics.Handler(), cfg.ShutdownTimeout); err != nil && ctx.Err() == nil {
+			logger.Error("metrics server stopped", "error", err)
+			stop()
+		}
+	}()
 
 	logger.Info("API started", "environment", cfg.AppEnv, "address", cfg.HTTPAddress)
 	if err := httpserver.Serve(ctx, server, listener, cfg.ShutdownTimeout); err != nil {

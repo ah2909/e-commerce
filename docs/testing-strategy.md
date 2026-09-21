@@ -51,4 +51,6 @@ During development, run the smallest command that covers the changed behavior.
 - Dependency, authentication, cryptography, or release change: also run `make vulncheck`.
 - Broad cross-module change or release candidate: run `make verify`.
 
+Operational release candidates also build and inspect the container, parse deployment/monitoring configuration, scan secrets/SBOM/container vulnerabilities, run a bounded dynamic baseline against a disposable API, and execute the versioned load scenario against synthetic data. Backup/restore, migration-lock, and capacity evidence comes from a disposable production-like environment and is recorded as unavailable rather than passed when that environment is absent. See [capacity and security evidence](capacity-and-security.md) and [production deployment](production-deployment.md).
+
 CI may continue running the full suite. A skipped, unavailable, or failed required check must be reported accurately, but unrelated expensive checks are not required for every small change.

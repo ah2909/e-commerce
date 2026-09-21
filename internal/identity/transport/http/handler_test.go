@@ -184,3 +184,13 @@ func TestSocialRedirectTargetUsesOnlyValidatedServerComponents(t *testing.T) {
 		}
 	}
 }
+
+func TestSocialRedirectTargetUsesConfiguredSingleStoreHost(t *testing.T) {
+	target, err := socialRedirectTargetHost("persisted-subdomain", "platform.example", "shop.customer.example", "/auth/social/complete", "one-time-code")
+	if err != nil || target != "https://shop.customer.example/auth/social/complete?exchange_code=one-time-code" {
+		t.Fatalf("socialRedirectTargetHost() = %q, %v", target, err)
+	}
+	if _, err := socialRedirectTargetHost("shop", "platform.example", "shop.customer.example:8443", "/auth/social/complete", "code"); err == nil {
+		t.Fatal("unsafe exact host accepted")
+	}
+}

@@ -66,6 +66,15 @@ func (keyring Keyring) Decrypt(envelope Envelope, additionalData []byte) ([]byte
 	return plaintext, nil
 }
 
+func (keyring Keyring) ActiveVersion() int {
+	return keyring.active
+}
+
+func (keyring Keyring) HasVersion(version int) bool {
+	_, ok := keyring.keys[version]
+	return ok
+}
+
 func (keyring Keyring) aead(version int) (cipher.AEAD, error) {
 	key, ok := keyring.keys[version]
 	if !ok {

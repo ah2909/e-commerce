@@ -61,7 +61,7 @@ Accepted [Task 018](../tasks/archive/018-event-workers-derived-integrations.md) 
 | Cancellation and refunds | Implemented and accepted | Accepted task 016 implements shopper/workforce cancellation, explicit permissions, provider-specific full-refund settlement, atomic restock, and tenant/concurrency/rollback evidence. |
 | Shipping and fulfillment | Implemented and accepted | Task 013 adds versioned flat/free VND shipping rules and checkout snapshots. Accepted task 017 adds manual one-shipment fulfillment, carrier/tracking, permissions, admin reads, atomic order/shipment transitions, and tenant/concurrency/rollback evidence. |
 | Event workers | Implemented and accepted | Task 018 adds concurrent leased publication, bounded retry/terminal handling, five fixed Kafka topics, tenant-scoped inbox deduplication, redacted dead letters, operator inspection/requeue/replay, and rebuildable Search/Analytics/email-intent consumers. Both independent reviews and final verification passed. |
-| Operational hardening | Partially implemented | Structured logging, health checks, bounded shutdown/dependency configuration, CI, and local dependency controls exist. Backup/restore, dashboards, alerts, secret rotation, load/security tests, launch SLO/RPO/RTO, and production runbooks are not implemented or proven. |
+| Operational hardening | Implementing | Task 019 adds exact-host single-store routing, production validation, bounded telemetry, secure Kafka/Redis options, immutable container/deployment examples, payment-key rotation, approved event retention with migration 13, backup/restore tooling, dashboards/alerts, bounded load/security checks, and runbooks. Selected-environment SLO/RPO/RTO, restore, capacity, ingress, paging, and live-provider evidence remain launch gates. |
 
 ## Implemented database schema
 
@@ -137,7 +137,11 @@ Accepted [Task 018](../tasks/archive/018-event-workers-derived-integrations.md) 
 - tenant-scoped consumer inboxes plus redacted broker-coordinate dead letters with validated-envelope replay state
 - rebuildable tenant Search documents, UTC daily Analytics counts, and purpose-limited pending email intents
 
-The schema intentionally does not include platform operators, post-MVP coupons, or destructive event-retention jobs.
+### Migration 00013
+
+- partial indexes for bounded cleanup of successfully published outbox rows and resolved event dead letters; processed inbox retention uses the existing migration-12 index
+
+The schema intentionally does not include platform operators or post-MVP coupons. Event retention is an explicit operator command limited to approved terminal records and is disabled by the incident hold.
 
 ## Current accepted risks and release blockers
 

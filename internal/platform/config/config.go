@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 )
 
 const (
@@ -46,6 +48,14 @@ const (
 	defaultEventLease              = 30 * time.Second
 	defaultEventRetryBase          = time.Second
 	defaultEventRetryMax           = 5 * time.Minute
+	defaultDBMaxOpen               = 20
+	defaultDBMaxIdle               = 10
+	defaultDBConnectionLifetime    = 30 * time.Minute
+	defaultDBConnectionIdleTime    = 5 * time.Minute
+	defaultDBStatementTimeout      = 15 * time.Second
+	defaultDBLockTimeout           = 3 * time.Second
+	defaultDBIdleTransaction       = 15 * time.Second
+	defaultSlowQueryThreshold      = 500 * time.Millisecond
 )
 
 type RateLimit struct {
@@ -68,13 +78,34 @@ type Eventing struct {
 	RetryMax    time.Duration
 }
 
+type RoutingMode string
+
+const (
+	RoutingMultiStore  RoutingMode = "multi_store"
+	RoutingSingleStore RoutingMode = "single_store"
+)
+
 type Config struct {
 	AppEnv                     string
 	HTTPAddress                string
+	MetricsAddress             string
+	OTLPTraceEndpoint          string
 	LogLevel                   slog.Level
 	DatabaseURL                string
+	DatabaseMaxOpen            int
+	DatabaseMaxIdle            int
+	DatabaseConnectionLifetime time.Duration
+	DatabaseConnectionIdleTime time.Duration
+	DatabaseStatementTimeout   time.Duration
+	DatabaseLockTimeout        time.Duration
+	DatabaseIdleTransaction    time.Duration
+	SlowQueryThreshold         time.Duration
 	RedisAddress               string
+	RedisTLSEnabled            bool
 	KafkaBrokers               []string
+	KafkaTLSEnabled            bool
+	KafkaSASLUsername          string
+	KafkaSASLPassword          string
 	ShutdownTimeout            time.Duration
 	DependencyTimeout          time.Duration
 	TenantResolutionTimeout    time.Duration
@@ -84,6 +115,10 @@ type Config struct {
 	SocialTransactionTTL       time.Duration
 	SocialExchangeTTL          time.Duration
 	TenantBaseDomain           string
+	RoutingMode                RoutingMode
+	PlatformHost               string
+	SingleStoreHost            string
+	SingleStoreID              ids.StoreID
 	AuthHost                   string
 	PlatformAdminToken         [32]byte
 	TrustedProxyCIDRs          []netip.Prefix
@@ -123,6 +158,9 @@ func Load() (Config, error) {
 
 func LoadFrom(lookup LookupFunc) (Config, error) {
 	appEnv := optional(lookup, "APP_ENV", defaultAppEnv)
+	if appEnv != "development" && appEnv != "test" && appEnv != "production" {
+		return Config{}, fmt.Errorf("APP_ENV must be development, test, or production")
+	}
 	httpAddress := optional(lookup, "HTTP_ADDRESS", defaultHTTPAddress)
 	logLevelText := optional(lookup, "LOG_LEVEL", defaultLogLevel)
 	databaseURL, err := required(lookup, "DATABASE_URL")
@@ -148,13 +186,68 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err := validateDatabaseURL(databaseURL); err != nil {
 		return Config{}, err
 	}
+	databaseMaxOpen, err := integer(lookup, "DATABASE_MAX_OPEN", defaultDBMaxOpen, 2, 200)
+	if err != nil {
+		return Config{}, err
+	}
+	databaseMaxIdle, err := integer(lookup, "DATABASE_MAX_IDLE", defaultDBMaxIdle, 0, 200)
+	if err != nil || databaseMaxIdle > databaseMaxOpen {
+		return Config{}, fmt.Errorf("DATABASE_MAX_IDLE must be between zero and DATABASE_MAX_OPEN")
+	}
+	databaseConnectionLifetime, err := duration(lookup, "DATABASE_CONNECTION_LIFETIME", defaultDBConnectionLifetime, 24*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	databaseConnectionIdleTime, err := duration(lookup, "DATABASE_CONNECTION_IDLE_TIME", defaultDBConnectionIdleTime, time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	databaseStatementTimeout, err := duration(lookup, "DATABASE_STATEMENT_TIMEOUT", defaultDBStatementTimeout, 2*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	databaseLockTimeout, err := duration(lookup, "DATABASE_LOCK_TIMEOUT", defaultDBLockTimeout, 30*time.Second)
+	if err != nil || databaseLockTimeout >= databaseStatementTimeout {
+		return Config{}, fmt.Errorf("DATABASE_LOCK_TIMEOUT must be positive and less than DATABASE_STATEMENT_TIMEOUT")
+	}
+	databaseIdleTransaction, err := duration(lookup, "DATABASE_IDLE_TRANSACTION_TIMEOUT", defaultDBIdleTransaction, 2*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	slowQueryThreshold, err := duration(lookup, "SLOW_QUERY_THRESHOLD", defaultSlowQueryThreshold, 30*time.Second)
+	if err != nil || slowQueryThreshold >= databaseStatementTimeout {
+		return Config{}, fmt.Errorf("SLOW_QUERY_THRESHOLD must be positive and less than DATABASE_STATEMENT_TIMEOUT")
+	}
+	metricsAddress := optionalEmpty(lookup, "METRICS_ADDRESS")
+	if metricsAddress != "" {
+		if err := validateAddress("METRICS_ADDRESS", metricsAddress, true); err != nil {
+			return Config{}, err
+		}
+	}
+	otlpTraceEndpoint := optionalEmpty(lookup, "OTEL_EXPORTER_OTLP_ENDPOINT")
+	if err := validateOTLPEndpoint(otlpTraceEndpoint); err != nil {
+		return Config{}, err
+	}
 	if err := validateAddress("REDIS_ADDRESS", redisAddress, false); err != nil {
+		return Config{}, err
+	}
+	redisTLSEnabled, err := boolean(lookup, "REDIS_TLS_ENABLED", false)
+	if err != nil {
 		return Config{}, err
 	}
 
 	kafkaBrokers, err := parseAddresses("KAFKA_BROKERS", kafkaBrokerText)
 	if err != nil {
 		return Config{}, err
+	}
+	kafkaTLSEnabled, err := boolean(lookup, "KAFKA_TLS_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	kafkaSASLUsername := optionalEmpty(lookup, "KAFKA_SASL_USERNAME")
+	kafkaSASLPassword := optionalEmpty(lookup, "KAFKA_SASL_PASSWORD")
+	if (kafkaSASLUsername == "") != (kafkaSASLPassword == "") {
+		return Config{}, fmt.Errorf("KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD must be configured together")
 	}
 	shutdownTimeout, err := duration(lookup, "SHUTDOWN_TIMEOUT", defaultShutdownTimeout, maxShutdownTimeout)
 	if err != nil {
@@ -190,12 +283,19 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	}
 	tenantBaseDomain := strings.ToLower(optional(lookup, "TENANT_BASE_DOMAIN", defaultTenantBaseDomain))
 	authHost := strings.ToLower(optional(lookup, "AUTH_HOST", defaultAuthHost))
-	if err := validateTenantHosts(tenantBaseDomain, authHost); err != nil {
+	routingMode := RoutingMode(strings.ToLower(optional(lookup, "TENANT_ROUTING_MODE", string(RoutingMultiStore))))
+	platformHost := strings.ToLower(optional(lookup, "PLATFORM_HOST", tenantBaseDomain))
+	singleStoreHost := strings.ToLower(optionalEmpty(lookup, "SINGLE_STORE_HOST"))
+	singleStoreID, err := parseRouting(routingMode, tenantBaseDomain, platformHost, authHost, singleStoreHost, optionalEmpty(lookup, "SINGLE_STORE_ID"))
+	if err != nil {
 		return Config{}, err
 	}
 	platformAdminToken, err := platformToken(lookup)
 	if err != nil {
 		return Config{}, err
+	}
+	if appEnv == "production" && optionalEmpty(lookup, "PLATFORM_ADMIN_TOKEN") == "ZGV2LXBsYXRmb3JtLWFkbWluLXRva2VuLTAwMDAwMDA" {
+		return Config{}, fmt.Errorf("PLATFORM_ADMIN_TOKEN must not use the development value in production")
 	}
 	trustedProxyCIDRs, err := parseCIDRs(optionalEmpty(lookup, "TRUSTED_PROXY_CIDRS"))
 	if err != nil {
@@ -299,14 +399,31 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 	if err != nil || eventRetryMax < eventRetryBase {
 		return Config{}, fmt.Errorf("EVENT_RETRY_MAX must be at least EVENT_RETRY_BASE and at most 24h0m0s")
 	}
+	if err := validateProduction(appEnv, databaseURL, tenantBaseDomain, platformHost, authHost, singleStoreHost, metricsAddress, otlpTraceEndpoint, redisTLSEnabled, kafkaTLSEnabled, kafkaSASLUsername); err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		AppEnv:                     appEnv,
 		HTTPAddress:                httpAddress,
+		MetricsAddress:             metricsAddress,
+		OTLPTraceEndpoint:          otlpTraceEndpoint,
 		LogLevel:                   logLevel,
 		DatabaseURL:                databaseURL,
+		DatabaseMaxOpen:            databaseMaxOpen,
+		DatabaseMaxIdle:            databaseMaxIdle,
+		DatabaseConnectionLifetime: databaseConnectionLifetime,
+		DatabaseConnectionIdleTime: databaseConnectionIdleTime,
+		DatabaseStatementTimeout:   databaseStatementTimeout,
+		DatabaseLockTimeout:        databaseLockTimeout,
+		DatabaseIdleTransaction:    databaseIdleTransaction,
+		SlowQueryThreshold:         slowQueryThreshold,
 		RedisAddress:               redisAddress,
+		RedisTLSEnabled:            redisTLSEnabled,
 		KafkaBrokers:               kafkaBrokers,
+		KafkaTLSEnabled:            kafkaTLSEnabled,
+		KafkaSASLUsername:          kafkaSASLUsername,
+		KafkaSASLPassword:          kafkaSASLPassword,
 		ShutdownTimeout:            shutdownTimeout,
 		DependencyTimeout:          dependencyTimeout,
 		TenantResolutionTimeout:    tenantResolutionTimeout,
@@ -316,6 +433,10 @@ func LoadFrom(lookup LookupFunc) (Config, error) {
 		SocialTransactionTTL:       socialTransactionTTL,
 		SocialExchangeTTL:          socialExchangeTTL,
 		TenantBaseDomain:           tenantBaseDomain,
+		RoutingMode:                routingMode,
+		PlatformHost:               platformHost,
+		SingleStoreHost:            singleStoreHost,
+		SingleStoreID:              singleStoreID,
 		AuthHost:                   authHost,
 		PlatformAdminToken:         platformAdminToken,
 		TrustedProxyCIDRs:          trustedProxyCIDRs,
@@ -375,11 +496,34 @@ func validateMoMoURLs(appEnv, apiBase, redirect, public string) error {
 	return nil
 }
 
-func validateTenantHosts(baseDomain, authHost string) error {
-	if !validHostname(baseDomain) || !validHostname(authHost) || authHost != "auth."+baseDomain {
-		return fmt.Errorf("AUTH_HOST must be auth.TENANT_BASE_DOMAIN and both must be valid hostnames")
+func parseRouting(mode RoutingMode, baseDomain, platformHost, authHost, singleHost, singleID string) (ids.StoreID, error) {
+	if !validHostname(baseDomain) || !validHostname(platformHost) || !validHostname(authHost) {
+		return "", fmt.Errorf("TENANT_BASE_DOMAIN, PLATFORM_HOST, and AUTH_HOST must be valid hostnames")
 	}
-	return nil
+	if platformHost == authHost {
+		return "", fmt.Errorf("PLATFORM_HOST and AUTH_HOST must be distinct")
+	}
+	switch mode {
+	case RoutingMultiStore:
+		if platformHost != baseDomain || authHost != "auth."+baseDomain {
+			return "", fmt.Errorf("multi_store routing requires PLATFORM_HOST=TENANT_BASE_DOMAIN and AUTH_HOST=auth.TENANT_BASE_DOMAIN")
+		}
+		if singleHost != "" || singleID != "" {
+			return "", fmt.Errorf("SINGLE_STORE_HOST and SINGLE_STORE_ID are only valid in single_store routing")
+		}
+		return "", nil
+	case RoutingSingleStore:
+		if !validHostname(singleHost) || singleHost == platformHost || singleHost == authHost || strings.HasSuffix(singleHost, "."+platformHost) || strings.HasSuffix(authHost, "."+singleHost) {
+			return "", fmt.Errorf("single_store routing requires a distinct exact SINGLE_STORE_HOST")
+		}
+		storeID, err := ids.ParseStoreID(singleID)
+		if err != nil {
+			return "", fmt.Errorf("SINGLE_STORE_ID must be a valid UUID")
+		}
+		return storeID, nil
+	default:
+		return "", fmt.Errorf("TENANT_ROUTING_MODE must be multi_store or single_store")
+	}
 }
 
 func validHostname(value string) bool {
@@ -467,6 +611,15 @@ func integer(lookup LookupFunc, key string, fallback, minimum, maximum int) (int
 	value, err := strconv.Atoi(text)
 	if err != nil || value < minimum || value > maximum {
 		return 0, fmt.Errorf("%s must be between %d and %d", key, minimum, maximum)
+	}
+	return value, nil
+}
+
+func boolean(lookup LookupFunc, key string, fallback bool) (bool, error) {
+	text := optional(lookup, key, strconv.FormatBool(fallback))
+	value, err := strconv.ParseBool(text)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", key)
 	}
 	return value, nil
 }
@@ -596,6 +749,46 @@ func validateDatabaseURL(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
 		return fmt.Errorf("DATABASE_URL must be a PostgreSQL URL with a host")
+	}
+	return nil
+}
+
+func validateProduction(appEnv, databaseURL, baseDomain, platformHost, authHost, singleStoreHost, metricsAddress, otlpEndpoint string, redisTLS, kafkaTLS bool, kafkaUsername string) error {
+	if appEnv != "production" {
+		return nil
+	}
+	parsed, _ := url.Parse(databaseURL)
+	sslMode := strings.ToLower(parsed.Query().Get("sslmode"))
+	if sslMode != "verify-full" {
+		return fmt.Errorf("DATABASE_URL must use sslmode=verify-full in production")
+	}
+	if metricsAddress == "" {
+		return fmt.Errorf("METRICS_ADDRESS is required in production")
+	}
+	if !strings.HasPrefix(otlpEndpoint, "https://") {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must use HTTPS in production")
+	}
+	if !redisTLS {
+		return fmt.Errorf("REDIS_TLS_ENABLED must be true in production")
+	}
+	if !kafkaTLS || kafkaUsername == "" {
+		return fmt.Errorf("kafka TLS and SASL credentials are required in production")
+	}
+	for name, host := range map[string]string{"TENANT_BASE_DOMAIN": baseDomain, "PLATFORM_HOST": platformHost, "AUTH_HOST": authHost, "SINGLE_STORE_HOST": singleStoreHost} {
+		if host != "" && (host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".test")) {
+			return fmt.Errorf("%s must be a public deployment hostname in production", name)
+		}
+	}
+	return nil
+}
+
+func validateOTLPEndpoint(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must be an HTTP(S) URL without credentials, query, or fragment")
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ah2909/e-commerce/internal/platform/httpserver"
 	"github.com/ah2909/e-commerce/internal/platform/problem"
+	"github.com/ah2909/e-commerce/internal/shared/ids"
 	"github.com/ah2909/e-commerce/internal/stores/application"
 	"github.com/ah2909/e-commerce/internal/stores/domain"
 	"github.com/gin-gonic/gin"
@@ -22,28 +23,36 @@ type StoreResolver interface {
 	Execute(context.Context, string) (application.StoreRecord, error)
 }
 
+type StoreIDResolver interface {
+	ExecuteID(context.Context, ids.StoreID) (application.StoreRecord, error)
+}
+
 type HostMiddleware struct {
-	resolver   StoreResolver
-	baseDomain string
-	authHost   string
-	logger     *slog.Logger
-	timeout    time.Duration
+	resolver        StoreResolver
+	baseDomain      string
+	platformHost    string
+	authHost        string
+	singleStoreHost string
+	singleStoreID   ids.StoreID
+	logger          *slog.Logger
+	timeout         time.Duration
 }
 
 func NewHostMiddleware(resolver StoreResolver, baseDomain, authHost string, logger *slog.Logger, timeout time.Duration) HostMiddleware {
-	return HostMiddleware{resolver: resolver, baseDomain: normalizeHost(baseDomain), authHost: normalizeHost(authHost), logger: logger, timeout: timeout}
+	return NewHostMiddlewareWithRouting(resolver, baseDomain, baseDomain, authHost, "", "", logger, timeout)
+}
+
+func NewHostMiddlewareWithRouting(resolver StoreResolver, baseDomain, platformHost, authHost, singleStoreHost string, singleStoreID ids.StoreID, logger *slog.Logger, timeout time.Duration) HostMiddleware {
+	return HostMiddleware{resolver: resolver, baseDomain: normalizeHost(baseDomain), platformHost: normalizeHost(platformHost), authHost: normalizeHost(authHost), singleStoreHost: normalizeHost(singleStoreHost), singleStoreID: singleStoreID, logger: logger, timeout: timeout}
 }
 
 func (middleware HostMiddleware) Tenant(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		subdomain, ok := tenantSubdomain(r.Host, middleware.baseDomain)
+		store, ok, err := middleware.resolve(r.Context(), r.Host)
 		if !ok {
 			problem.Write(w, r, http.StatusNotFound, "storefront_unavailable", "Storefront is unavailable.", nil)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), middleware.timeout)
-		defer cancel()
-		store, err := middleware.resolver.Execute(ctx, subdomain)
 		if errors.Is(err, application.ErrStoreUnavailable) {
 			problem.Write(w, r, http.StatusNotFound, "storefront_unavailable", "Storefront is unavailable.", nil)
 			return
@@ -58,13 +67,13 @@ func (middleware HostMiddleware) Tenant(next http.Handler) http.Handler {
 			problem.Write(w, r, http.StatusInternalServerError, "internal_error", "An internal error occurred.", nil)
 			return
 		}
-		ctx = context.WithValue(r.Context(), storeContextKey{}, store)
+		ctx := context.WithValue(r.Context(), storeContextKey{}, store)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func (middleware HostMiddleware) Base(next http.Handler) http.Handler {
-	return middleware.exactHost(middleware.baseDomain, next)
+	return middleware.exactHost(middleware.platformHost, next)
 }
 
 func (middleware HostMiddleware) Auth(next http.Handler) http.Handler {
@@ -74,15 +83,12 @@ func (middleware HostMiddleware) Auth(next http.Handler) http.Handler {
 func (middleware HostMiddleware) TenantGin() gin.HandlerFunc {
 	return func(request *gin.Context) {
 		r := request.Request
-		subdomain, ok := tenantSubdomain(r.Host, middleware.baseDomain)
+		store, ok, err := middleware.resolve(r.Context(), r.Host)
 		if !ok {
 			problem.Write(request.Writer, r, http.StatusNotFound, "storefront_unavailable", "Storefront is unavailable.", nil)
 			request.Abort()
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), middleware.timeout)
-		defer cancel()
-		store, err := middleware.resolver.Execute(ctx, subdomain)
 		if errors.Is(err, application.ErrStoreUnavailable) {
 			problem.Write(request.Writer, r, http.StatusNotFound, "storefront_unavailable", "Storefront is unavailable.", nil)
 			request.Abort()
@@ -105,7 +111,29 @@ func (middleware HostMiddleware) TenantGin() gin.HandlerFunc {
 }
 
 func (middleware HostMiddleware) BaseGin() gin.HandlerFunc {
-	return middleware.exactHostGin(middleware.baseDomain)
+	return middleware.exactHostGin(middleware.platformHost)
+}
+
+func (middleware HostMiddleware) resolve(parent context.Context, host string) (application.StoreRecord, bool, error) {
+	ctx, cancel := context.WithTimeout(parent, middleware.timeout)
+	defer cancel()
+	if middleware.singleStoreHost != "" {
+		if normalizeHost(host) != middleware.singleStoreHost {
+			return application.StoreRecord{}, false, nil
+		}
+		resolver, ok := middleware.resolver.(StoreIDResolver)
+		if !ok {
+			return application.StoreRecord{}, true, errors.New("single-store resolver is unavailable")
+		}
+		store, err := resolver.ExecuteID(ctx, middleware.singleStoreID)
+		return store, true, err
+	}
+	subdomain, ok := tenantSubdomain(host, middleware.baseDomain)
+	if !ok {
+		return application.StoreRecord{}, false, nil
+	}
+	store, err := middleware.resolver.Execute(ctx, subdomain)
+	return store, true, err
 }
 func (middleware HostMiddleware) AuthGin() gin.HandlerFunc {
 	return middleware.exactHostGin(middleware.authHost)

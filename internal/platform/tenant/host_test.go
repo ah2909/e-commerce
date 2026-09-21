@@ -18,6 +18,15 @@ type hostResolver struct {
 	err       error
 }
 
+func (resolver *hostResolver) ExecuteID(_ context.Context, storeID ids.StoreID) (application.StoreRecord, error) {
+	resolver.subdomain = "by-id"
+	if resolver.err != nil {
+		return application.StoreRecord{}, resolver.err
+	}
+	parsed, _ := domain.ParseSubdomain("configured")
+	return application.StoreRecord{StoreID: storeID, Subdomain: parsed, Status: domain.StoreStatusActive}, nil
+}
+
 func (resolver *hostResolver) Execute(_ context.Context, subdomain string) (application.StoreRecord, error) {
 	resolver.subdomain = subdomain
 	if resolver.err != nil {
@@ -82,5 +91,30 @@ func TestHostMiddlewareSeparatesBaseAndAuthenticationHosts(t *testing.T) {
 				t.Fatalf("status = %d, want %d", response.Code, test.want)
 			}
 		})
+	}
+}
+
+func TestHostMiddlewareSingleStoreUsesExactHostAndConfiguredID(t *testing.T) {
+	resolver := &hostResolver{}
+	storeID, _ := ids.ParseStoreID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	middleware := NewHostMiddlewareWithRouting(resolver, "platform.example", "platform.example", "auth.platform.example", "shop.customer.example", storeID, slog.Default(), time.Second)
+	for _, test := range []struct {
+		host string
+		want int
+	}{{"shop.customer.example", http.StatusNoContent}, {"configured.platform.example", http.StatusNotFound}, {"shop.customer.example.evil", http.StatusNotFound}} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		request.Host = test.host
+		request.Header.Set("X-Forwarded-Host", "shop.customer.example")
+		middleware.Tenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			store, ok := StoreFromContext(r.Context())
+			if !ok || store.StoreID != storeID {
+				t.Fatalf("store = %#v, found = %t", store, ok)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})).ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("host %s status = %d, want %d", test.host, response.Code, test.want)
+		}
 	}
 }

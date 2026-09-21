@@ -1,0 +1,48 @@
+{
+  "title": "E-commerce Operations",
+  "uid": "ecommerce-operations",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API request rate",
+      "targets": [{"expr": "sum by (status_class) (rate(commerce_http_requests_total[5m]))", "legendFormat": "{{status_class}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "API p95 latency",
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(commerce_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Database pool",
+      "targets": [{"expr": "commerce_database_connections", "legendFormat": "{{state}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker outcomes",
+      "targets": [{"expr": "sum by (operation,result) (rate(commerce_worker_operations_total[5m]))", "legendFormat": "{{operation}} {{result}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox age and state",
+      "targets": [
+        {"expr": "commerce_outbox_oldest_due_seconds", "legendFormat": "oldest due seconds"},
+        {"expr": "commerce_outbox_records", "legendFormat": "{{state}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+    },
+    {
+      "type": "timeseries",
+      "title": "Consumer dead letters",
+      "targets": [{"expr": "commerce_event_dead_letters", "legendFormat": "{{state}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+    }
+  ]
+}

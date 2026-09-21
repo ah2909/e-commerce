@@ -280,7 +280,11 @@ Migration 00010 targets the pre-production schema-9 dataset. Before deployment, 
 - Back up object-storage metadata and ensure object versioning/lifecycle matches database retention.
 - Redis and search/Kafka-derived projections are rebuilt from authoritative data or documented offsets; they are not the only copy of commerce state.
 - Restore tests must verify tenant isolation, order/payment/ledger consistency, outbox continuity, secret decryptability for active key versions, and application startup.
-- Operators set and verify concrete RPO/RTO before production. The current requirement is a basic single-region baseline, not an untested high-availability claim.
+- Operators verify the approved 15-minute PostgreSQL RPO and four-hour service RTO in the selected environment; repository-local checks are not proof.
+
+Migration 00013 adds partial indexes for published outbox retention by `(published_at, store_id, event_id)` and resolved dead-letter retention by `(resolved_at, dead_letter_id)`. It deletes no records. Large restored datasets must be timed for lock impact; if ordinary creation exceeds the window, the same indexes are created concurrently as a separately controlled pre-step.
+
+Runtime pools set connection lifetime/idle limits plus PostgreSQL statement, lock, and idle-in-transaction timeouts. The deployment owner budgets the sum of API and worker replica maxima below server capacity with an administrative reserve.
 
 ## Required database tests
 

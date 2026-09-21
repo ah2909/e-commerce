@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ah2909/e-commerce/internal/platform/observability"
 	"github.com/gin-gonic/gin"
 )
 
@@ -119,7 +120,7 @@ func ginRequestMiddleware(logger *slog.Logger) gin.HandlerFunc {
 			if path == "" {
 				path = "<unmatched>"
 			}
-			logger.Info("request completed", "request_id", requestID, "method", ctx.Request.Method, "path", path, "status", ctx.Writer.Status(), "duration_ms", time.Since(started).Milliseconds())
+			logger.Info("request completed", "request_id", requestID, "trace_id", observability.TraceID(ctx.Request.Context()), "method", ctx.Request.Method, "path", path, "status", ctx.Writer.Status(), "duration_ms", time.Since(started).Milliseconds())
 		}()
 		ctx.Next()
 	}

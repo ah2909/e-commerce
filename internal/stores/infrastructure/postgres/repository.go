@@ -122,6 +122,22 @@ func (repository *Repository) ResolveStoreBySubdomain(ctx context.Context, subdo
 	return application.StoreRecord{StoreID: storeID, Subdomain: domain.Subdomain(row.Subdomain), Name: row.Name, Status: domain.StoreStatus(row.Status), DefaultCurrency: row.DefaultCurrency, Locale: row.Locale, Timezone: row.Timezone, SettingsVersion: row.SettingsVersion}, true, nil
 }
 
+func (repository *Repository) ResolveStoreByID(ctx context.Context, storeID ids.StoreID) (application.StoreRecord, bool, error) {
+	var row storeRow
+	err := repository.db.WithContext(ctx).Where("store_id = ?", storeID.String()).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return application.StoreRecord{}, false, nil
+	}
+	if err != nil {
+		return application.StoreRecord{}, false, fmt.Errorf("query store by ID: %w", err)
+	}
+	resolvedStoreID, err := ids.ParseStoreID(row.StoreID)
+	if err != nil {
+		return application.StoreRecord{}, false, fmt.Errorf("restore store ID: %w", err)
+	}
+	return application.StoreRecord{StoreID: resolvedStoreID, Subdomain: domain.Subdomain(row.Subdomain), Name: row.Name, Status: domain.StoreStatus(row.Status), DefaultCurrency: row.DefaultCurrency, Locale: row.Locale, Timezone: row.Timezone, SettingsVersion: row.SettingsVersion}, true, nil
+}
+
 func (repository *Repository) ListMemberships(ctx context.Context, storeID ids.StoreID) ([]domain.Membership, error) {
 	var rows []membershipRow
 	if err := repository.db.WithContext(ctx).Where("store_id = ?", storeID.String()).Order("created_at,user_id").Find(&rows).Error; err != nil {
