@@ -14,7 +14,6 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 | Task | State | Next gate |
 | --- | --- | --- |
-| [020 CI integration pool starvation](020-ci-integration-pool-starvation.md) | Fix, reviews, and local verification passed; hosted Linux CI confirmation pending | Run `Backend verification` on the published fix |
 | [015 MoMo payments](015-momo-payments.md) | Reviews and automated verification passed; live sandbox UAT blocked on external prerequisites | `make test-momo-sandbox` |
 | [013 Checkout and orders](archive/013-checkout-orders.md) | Implemented and accepted; both reviews and final verification passed | None |
 | [004 Identity and authorization](004-identity-authorization.md) | Revision 5 verified for continued development; two medium findings explicitly skipped and task inactive | None scheduled; reopen with `$ec-fix` only if the risk decision changes |
@@ -24,6 +23,7 @@ Tasks are the unit of project delivery. Each task retains its requirements, appr
 
 | Task | Completed outcome |
 | --- | --- |
+| [020 CI integration pool starvation](archive/020-ci-integration-pool-starvation.md) | Orders integration pool capacity and bounded lock observation; hosted Backend verification passed |
 | [000 Workflow setup](archive/000-workflow-setup.md) | Project delivery workflow and agent configuration |
 | [001 Bootstrap](archive/001-bootstrap.md) | Go service foundation, dependencies, health, migrations, CI, and verification targets |
 | [002 Stage commands](archive/002-stage-commands.md) | Reusable stage-only workflow skills |
