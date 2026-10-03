@@ -87,16 +87,20 @@ func (authorizer blockingPaymentAuthorizer) HasPermissionInTransaction(ctx conte
 
 func waitForBlockedQueries(t *testing.T, pool *pgxpool.Pool, fragment string, minimum int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for ctx.Err() == nil {
 		var count int
-		if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND wait_event_type='Lock' AND query ILIKE '%'||$1||'%'`, fragment).Scan(&count); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND wait_event_type='Lock' AND query ILIKE '%'||$1||'%'`, fragment).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count >= minimum {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	t.Fatalf("did not observe %d blocked queries containing %q", minimum, fragment)
 }

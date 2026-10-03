@@ -262,6 +262,7 @@ func orderPool(t testing.TB) *pgxpool.Pool {
 	if err := databaseguard.ValidateConfig(config.ConnConfig, os.Getenv("ALLOW_TEST_DATABASE_MUTATION")); err != nil {
 		t.Fatal(err)
 	}
+	config.MaxConns = 8
 	pool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)

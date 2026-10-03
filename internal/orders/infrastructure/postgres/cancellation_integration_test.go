@@ -259,11 +259,14 @@ func TestVietQRFullRefundRestocksAndCompletesAtomically(t *testing.T) {
 	if err := pool.QueryRow(context.Background(), `SELECT version FROM inventory_stock_items WHERE store_id=$1 AND variant_id=$2`, pair.A.Store.ID(), fixture.variantID).Scan(&stockVersion); err != nil {
 		t.Fatal(err)
 	}
-	blocker, err := pool.Begin(context.Background())
+	raceCtx, cancelRace := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelRace()
+	blocker, err := pool.Begin(raceCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := blocker.Exec(context.Background(), `SELECT 1 FROM inventory_stock_items WHERE store_id=$1 AND variant_id=$2 FOR UPDATE`, pair.A.Store.ID(), fixture.variantID); err != nil {
+	defer blocker.Rollback(context.Background())
+	if _, err := blocker.Exec(raceCtx, `SELECT 1 FROM inventory_stock_items WHERE store_id=$1 AND variant_id=$2 FOR UPDATE`, pair.A.Store.ID(), fixture.variantID); err != nil {
 		t.Fatal(err)
 	}
 	ready := make(chan struct{})
@@ -273,18 +276,18 @@ func TestVietQRFullRefundRestocksAndCompletesAtomically(t *testing.T) {
 		go func(index int) {
 			defer wait.Done()
 			<-ready
-			refunds[index], settlementErrors[index] = configured.SettleVietQRRefund(context.Background(), pair.A.Store.ID(), cancel.RefundID, pair.A.UserID, "settle-refund", "BANK-REF-123", settledAt, "settle-refund")
+			refunds[index], settlementErrors[index] = configured.SettleVietQRRefund(raceCtx, pair.A.Store.ID(), cancel.RefundID, pair.A.UserID, "settle-refund", "BANK-REF-123", settledAt, "settle-refund")
 		}(index)
 	}
 	close(ready)
 	waitForBlockedQueries(t, pool, "inventory_stock_items", 1)
 	adjustmentDone := make(chan error, 1)
 	go func() {
-		_, err := inventoryapplication.NewService(repository.inventory.(*inventorypostgres.Repository)).Adjust(context.Background(), pair.A.Store.ID(), inventorydomain.Adjustment{VariantID: fixture.variantID, QuantityDelta: 1, Reason: "refund race", ExpectedVersion: stockVersion, IdempotencyKey: "refund-adjustment-race", ActorID: pair.A.UserID, RequestID: "refund-adjustment-race"})
+		_, err := inventoryapplication.NewService(repository.inventory.(*inventorypostgres.Repository)).Adjust(raceCtx, pair.A.Store.ID(), inventorydomain.Adjustment{VariantID: fixture.variantID, QuantityDelta: 1, Reason: "refund race", ExpectedVersion: stockVersion, IdempotencyKey: "refund-adjustment-race", ActorID: pair.A.UserID, RequestID: "refund-adjustment-race"})
 		adjustmentDone <- err
 	}()
 	waitForBlockedQueries(t, pool, "inventory_stock_items", 2)
-	if err := blocker.Commit(context.Background()); err != nil {
+	if err := blocker.Commit(raceCtx); err != nil {
 		t.Fatal(err)
 	}
 	wait.Wait()
