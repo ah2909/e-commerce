@@ -177,6 +177,9 @@ func run() error {
 	tenantMiddleware := tenant.NewMiddleware(storesapplication.NewResolveTenant(storeRepository), logger, cfg.TenantResolutionTimeout)
 	storesHandler := storeshttp.NewHandler(membershipManager, identityHandler.AuthenticateUser(), tenantMiddleware, logger, cfg.DependencyTimeout)
 	storesHandler.Register(engine, hostMiddleware)
+	if schemaVersion >= 14 {
+		storesHandler.RegisterAppearance(engine, hostMiddleware, storesapplication.NewAppearanceService(storeRepository))
+	}
 	if catalogAvailable(schemaVersion) {
 		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)

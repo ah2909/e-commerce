@@ -91,7 +91,7 @@ func ValidateAddressDraft(draft AddressDraft) (AddressDraft, string, error) {
 	draft.PostalCode = strings.TrimSpace(draft.PostalCode)
 	draft.CountryCode = strings.ToUpper(strings.TrimSpace(draft.CountryCode))
 	phone, ok := normalizePhone(draft.Phone)
-	valid := bounded(draft.Label, 1, 80) && bounded(draft.RecipientName, 1, 160) && bounded(draft.Line1, 1, 240) && bounded(draft.Line2, 0, 240) && bounded(draft.Ward, 1, 120) && bounded(draft.District, 1, 120) && bounded(draft.Province, 1, 120) && bounded(draft.PostalCode, 0, 20)
+	valid := bounded(draft.Label, 1, 80) && bounded(draft.RecipientName, 1, 160) && bounded(draft.Line1, 1, 240) && bounded(draft.Line2, 0, 240) && bounded(draft.Ward, 1, 120) && bounded(draft.District, 0, 120) && bounded(draft.Province, 1, 120) && bounded(draft.PostalCode, 0, 20)
 	if !valid || len(draft.Phone) < 8 || len(draft.Phone) > 20 || !ok || draft.CountryCode != "VN" {
 		return AddressDraft{}, "", ErrInvalidCustomer
 	}

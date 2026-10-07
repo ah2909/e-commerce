@@ -70,6 +70,8 @@ Stop dependencies without deleting their volumes:
 make dev-deps-down
 ```
 
+For a ready-to-use demo and the steps to provision another store, see [local store setup](docs/local-store-setup.md).
+
 ## Configuration
 
 [`.env.example`](.env.example) lists development configuration and disposable local credentials. `make` supplies those development defaults; direct `go run` commands require the variables in the process environment.
@@ -139,12 +141,4 @@ On native Windows, race-enabled Go tests may be unavailable; use CI or WSL for r
 
 ## Delivery workflow
 
-Describe the outcome you want in normal language. Codex resolves or creates the task record, investigates the codebase, presents one implementation plan, and waits for one approval.
-
-After approval, say `continue`. Codex carries the task through implementation, independent architecture and security reviews, required fixes, and final verification.
-
-```text
-Describe work -> approve plan -> continue -> completion report
-```
-
-`$ecommerce-delivery` explicitly selects the same automatic behavior. The stage commands `$ec-plan`, `$ec-build`, `$ec-review`, `$ec-fix`, and `$ec-test` remain available as advanced controls. You normally do not need to choose a task path or workflow command. See the [development workflow](docs/development-workflow.md) for authoritative rules and [`tasks/`](tasks/) for delivery records.
+Delivery is manual. Invoke `$ec-plan`, `$ec-build`, `$ec-review`, `$ec-fix`, or `$ec-test` when you want that stage; each stops at its boundary. Ordinary requests and `continue` do not activate the workflow. `$ecommerce-delivery` explicitly selects the full sequence for a specified task. See the [development workflow](docs/development-workflow.md) and [task index](tasks/README.md).

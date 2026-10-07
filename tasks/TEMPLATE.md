@@ -1,5 +1,10 @@
 # Task: <short outcome>
 
+## Ownership
+
+- Repository: e-commerce (backend)
+- Keep this record only here; link sibling dependencies instead of copying it.
+
 ## Context
 
 Link the relevant product, architecture, domain, API, and decision documents.
@@ -41,7 +46,7 @@ Only include required constraints. Let Codex inspect the repository and propose 
 
 ## Delivery record
 
-Follow [the project workflow](../docs/development-workflow.md). Keep this record concise and update it as work progresses.
+Use [the project workflow](../docs/development-workflow.md) only when explicitly selected. Keep evidence concise; ordinary work does not require the workflow gates.
 
 - Stage: clarification / awaiting plan approval / implementing / reviewing / fixing / testing / complete / blocked
 - Active task: yes / no

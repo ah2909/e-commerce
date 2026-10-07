@@ -15,12 +15,12 @@ Build a maintainable multi-store e-commerce backend. Optimize for correctness, t
 
 ## Project delivery workflow
 
-- Follow `docs/development-workflow.md` for implementation tasks in this project.
-- Use the normal workflow: clarify material requirements, present one plan, wait for one approval, then automatically implement, review, fix, and test.
-- Resolve or create the task record automatically when the request is clear. Do not ask the user to choose routine task numbers, paths, or workflow stages.
-- After plan approval, plain language such as `continue` resumes automatic delivery unless the user explicitly requests a narrower stage or asks to stop.
-- The project skills `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test` remain optional advanced controls that run one stage and stop at its boundary.
-- Spawn separate architect and security reviewer agents in parallel during the review stage, automatically after implementation only in automatic delivery. Use the project reviewer definitions under `.codex/agents/`, or pass their instructions explicitly when custom agent selection is unavailable.
+- Apply `docs/development-workflow.md` only when the user explicitly invokes a delivery skill or requests that workflow. Ordinary requests do not activate delivery gates or reviewer agents.
+- The user controls stages manually with `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test`; each runs one stage and stops. `continue` preserves the requested stage and does not enable automatic delivery.
+- `$ecommerce-delivery` explicitly selects the full workflow for the specified task. Do not infer this choice from an implementation request, an active task, or prior plan approval.
+- Keep each task record in exactly one owning repository: backend tasks in `e-commerce/tasks/`, frontend tasks in `e-commerce-ui/tasks/`. For mixed work, choose the repository owning the primary outcome and record sibling dependencies there; link to the canonical record instead of copying it.
+- Resolve or create the task record in its owning repository when requested or when an explicitly invoked workflow requires it. Do not ask the user to choose routine task numbers or paths.
+- Spawn separate architect and security reviewer agents in parallel only when the user selects the review stage or explicitly selects the full workflow. Use the project reviewer definitions under `.codex/agents/`, or pass their instructions explicitly when custom agent selection is unavailable.
 - Reviewers report findings only; they must not edit files, spawn agents, or restart the delivery workflow. The implementing agent owns fixes and final verification.
 - Unresolved blocking findings or failed/unavailable required checks prevent declaring the implementation complete.
 

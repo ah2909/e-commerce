@@ -1,12 +1,12 @@
 # Project delivery workflow
 
-This workflow applies only to this e-commerce project. It uses the architecture, invariants, and testing strategy already documented here. The task is the unit of delivery; do not expand into adjacent roadmap items.
+This workflow is optional and applies only when the user explicitly invokes a delivery skill or requests the workflow for an e-commerce task. It uses the architecture, invariants, and testing strategy already documented here. The task is the unit of delivery; do not expand into adjacent roadmap items.
 
-## Normal workflow
+## Explicit full workflow
 
 Describe the outcome -> plan and technical solution -> approve once -> continue -> completion report.
 
-Codex resolves or creates the task record automatically when the request is clear. It investigates the repository, presents one plan, and waits for approval. After approval, plain language such as `continue` resumes automatic delivery through implementation, parallel architecture and security reviews, in-scope fixes, re-review, and final testing.
+When the full workflow is explicitly selected, Codex resolves or creates the task record in its owning repository when the request is clear. It investigates the repository, presents one plan, and waits for approval. After approval within that explicitly selected full workflow, execution proceeds through implementation, parallel architecture and security reviews, in-scope fixes, re-review, and final testing.
 
 Check the conversation before asking for approval; approval persists across turns and context resets. A task checkbox or an agent's own statement is not evidence of user approval.
 
@@ -16,9 +16,9 @@ Read-only investigation and preparation of the task/plan may happen before appro
 
 ## Commands
 
-Natural-language requests that ask to change or implement the project use automatic delivery. Explanation, investigation, diagnosis, status, review-only, and test-only requests retain their requested boundary. `$ecommerce-delivery` explicitly selects automatic delivery and resumes from the first unmet applicable gate.
+Ordinary requests retain their requested scope and do not activate this workflow, its approval gates, or reviewer agents. The user manually selects a stage with an `ec-*` command. `$ecommerce-delivery` explicitly selects automatic delivery and resumes from the first unmet applicable gate.
 
-The following stage commands are optional advanced controls:
+The following commands select individual stages manually:
 
 | Command | Work performed | Stop boundary |
 | --- | --- | --- |
@@ -30,9 +30,9 @@ The following stage commands are optional advanced controls:
 
 ### Shared command rules
 
-An explicit `ec-*` command selects stage-only execution for the current turn and stops at the stated boundary. Record the last command, completed stage, pending gates, and next suggested command in the task's delivery record. Plain language such as `continue` after an approved plan returns to automatic delivery unless the user asks for a specific stage or stop boundary.
+An explicit `ec-*` command selects stage-only execution for the current turn and stops at the stated boundary. Record the last command, completed stage, pending gates, and next suggested command in the task's delivery record. Plain language such as `continue` preserves the selected stage and stop boundary; it never switches a stage-only request to automatic delivery.
 
-Resolve the task from an explicit path first, then an unambiguous task in the conversation, then a single task explicitly recorded as active. For a clear new outcome, create the next numbered task from `tasks/TEMPLATE.md` with a descriptive filename. Do not ask the user to choose a routine number or path. Ask only when task identity is materially ambiguous, and never select an unfinished roadmap item or use modification time as authorization. If several stage commands are supplied without a clear sequence or stop instruction, clarify the intended stage rather than silently chaining them.
+Resolve the task from an explicit path first, then an unambiguous task in the conversation, then a single task explicitly recorded as active. For a clear new outcome under an explicitly selected workflow, create the next numbered task from the owning repository's `tasks/TEMPLATE.md` with a descriptive filename. Backend tasks belong in `e-commerce/tasks/`; frontend tasks belong in `e-commerce-ui/tasks/`. Mixed work has one canonical record in the repository owning the primary outcome, with sibling dependencies and evidence recorded there. Never copy a task between repositories; use a link to its canonical record. Do not ask the user to choose a routine number or path. Ask only when task identity is materially ambiguous, and never select an unfinished roadmap item or use modification time as authorization. If several stage commands are supplied without a clear sequence or stop instruction, clarify the intended stage rather than silently chaining them.
 
 `$ec-build` and `$ec-fix` require actual user approval of the applicable plan revision. Their names alone do not approve an unapproved plan. Reuse approval established in the conversation; if a new session cannot establish it from available conversation evidence, ask the user to confirm the specific recorded plan before edits. Plan revisions that materially change scope require approval of the revision. Plan, review, and test commands may inspect existing work without implementation approval; they do not grant permission to change it.
 
@@ -100,7 +100,7 @@ Passing a development task establishes evidence for that slice. Production relea
 
 The reusable skill is `.agents/skills/ecommerce-delivery/SKILL.md`. The project `.codex/config.toml` enables agents and limits concurrent reviewer threads to two. Reviewers inherit the selected parent model and reasoning effort. Global configuration is unchanged.
 
-Start Codex in this project and describe the desired change. Invoke `$ecommerce-delivery` only when you want to select automatic delivery explicitly. If the skill does not appear, restart the session. Project `.codex/` settings require a trusted project and a runtime supporting custom agents; the explicit-instructions fallback above covers runtimes that only expose generic agent spawning.
+Start Codex in the repository owning the task. Invoke an `ec-*` skill for a single stage, or `$ecommerce-delivery` to explicitly select the full workflow. Ordinary requests and `continue` do not activate it. If the skill does not appear, restart the session. Project `.codex/` settings require a trusted project and a runtime supporting custom agents; the explicit-instructions fallback above covers runtimes that only expose generic agent spawning.
 
 GitHub Actions is the assumed CI provider. `.github/workflows/ci.yml` runs on pushes, pull requests, and manual dispatch. Its `Backend verification` job requires bootstrap artifacts, installs Go from `go.mod`, installs pinned tools through `make tools`, runs the five verification targets, and starts/stops disposable dependencies around integration tests.
 

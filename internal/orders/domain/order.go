@@ -156,7 +156,7 @@ func ValidateAddress(value Address) (Address, error) {
 	value.Province = strings.TrimSpace(value.Province)
 	value.PostalCode = strings.TrimSpace(value.PostalCode)
 	value.CountryCode = strings.ToUpper(strings.TrimSpace(value.CountryCode))
-	if !bounded(value.RecipientName, 1, 160) || !bounded(value.Phone, 8, 20) || !validPhone(value.Phone) || !bounded(value.Line1, 1, 240) || !bounded(value.Line2, 0, 240) || !bounded(value.Ward, 1, 120) || !bounded(value.District, 1, 120) || !bounded(value.Province, 1, 120) || !bounded(value.PostalCode, 0, 20) || value.CountryCode != "VN" {
+	if !bounded(value.RecipientName, 1, 160) || !bounded(value.Phone, 8, 20) || !validPhone(value.Phone) || !bounded(value.Line1, 1, 240) || !bounded(value.Line2, 0, 240) || !bounded(value.Ward, 1, 120) || !bounded(value.District, 0, 120) || !bounded(value.Province, 1, 120) || !bounded(value.PostalCode, 0, 20) || value.CountryCode != "VN" {
 		return Address{}, ErrInvalidOrder
 	}
 	return value, nil

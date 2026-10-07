@@ -9,4 +9,4 @@ Read [the project workflow](../../../docs/development-workflow.md), especially C
 
 Clarify material gaps and prepare the plan, technical solution, and verification strategy in the task document. Preserve existing implementation and identify any prior approval/evidence invalidated by a revision.
 
-Present the plan and stop. Do not implement, spawn reviewers, or run final verification. Report pending gates; after approval, suggest plain `continue` for automatic delivery or `$ec-build` for build-only execution.
+Present the plan and stop. Do not implement, spawn reviewers, or run final verification. Report pending gates; after approval, suggest `$ec-build` for the implementation stage. `continue` does not select automatic delivery.
