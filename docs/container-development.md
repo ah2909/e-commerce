@@ -22,6 +22,8 @@ Compose reads application settings from `.env` and replaces dependency addresses
 
 The project name remains `ecommerce-dev`, so the existing PostgreSQL, Redis, and Kafka volumes are reused. Stopping or rebuilding application containers retains the data. `down -v` deletes the project volumes, including database data.
 
+Fresh PostgreSQL volumes create `ecommerce_test` through the versioned script in `docker/postgres/init/`. Initialization scripts run only when the data directory is empty. Keep these bootstrap files in Git so fresh checkouts and CI receive the same databases as local development.
+
 ## Check and rebuild
 
 ```bash

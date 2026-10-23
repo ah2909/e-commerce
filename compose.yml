@@ -29,7 +29,12 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
-      - ./dev/postgres/init:/docker-entrypoint-initdb.d:ro
+      - type: bind
+        source: ./docker/postgres/init
+        target: /docker-entrypoint-initdb.d
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ecommerce -d ecommerce"]
       interval: 2s

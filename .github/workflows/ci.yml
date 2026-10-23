@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - name: Require bootstrap implementation
         run: |
-          for file in go.mod Makefile .env.example; do
+          for file in go.mod Makefile .env.example docker/postgres/init/001-create-test-database.sql; do
             if [[ ! -f "$file" ]]; then
               echo "::error::Missing $file. See tasks/archive/001-bootstrap.md; backend verification is unavailable."
               exit 1
