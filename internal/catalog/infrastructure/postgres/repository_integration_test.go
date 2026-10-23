@@ -504,6 +504,49 @@ func TestPublishedProductHydrationUsesConstantQueries(t *testing.T) {
 	}
 }
 
+func TestPublicCategoriesDenyOtherStoresAndHideDraftAndArchivedLabels(t *testing.T) {
+	pool := catalogPool(t)
+	pair := storefixture.NewPair(t, pool)
+	repository := catalogpostgres.NewRepository(gormtest.FromPool(t, pool))
+	ctx := context.Background()
+	now := time.Now().UTC()
+	categoryA := newCategory(t, pair.A.Store.ID(), "brand-nike")
+	categoryB := newCategory(t, pair.B.Store.ID(), "brand-nike")
+	for _, category := range []domain.Category{categoryA, categoryB} {
+		if _, err := repository.CreateCategory(ctx, category.StoreID, category); err != nil {
+			t.Fatal(err)
+		}
+	}
+	productA := newProduct(t, pair.A.Store.ID(), "public-a", "PUBLIC-A", "PUBLIC-A", []ids.CategoryID{categoryA.ID}, now)
+	productB := newProduct(t, pair.B.Store.ID(), "public-b", "PUBLIC-B", "PUBLIC-B", []ids.CategoryID{categoryB.ID}, now)
+	draft := newProduct(t, pair.A.Store.ID(), "draft-only", "DRAFT-ONLY", "DRAFT-ONLY", []ids.CategoryID{categoryA.ID}, now)
+	for _, product := range []domain.Product{productA, productB, draft} {
+		if _, err := repository.CreateProduct(ctx, product.StoreID, product); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, product := range []domain.Product{productA, productB} {
+		if _, err := pool.Exec(ctx, `UPDATE catalog_products SET status='published',published_at=$1 WHERE store_id=$2::uuid AND product_id=$3::uuid`, now, product.StoreID.String(), product.ID.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values, err := repository.ResolvePublicCategories(ctx, pair.A.Store.ID(), []ids.ProductID{productA.ID, productB.ID, draft.ID})
+	if err != nil || len(values) != 1 || len(values[productA.ID]) != 1 || values[productA.ID][0].CategoryID != categoryA.ID {
+		t.Fatalf("scoped categories = %#v, error = %v", values, err)
+	}
+	foreign, err := repository.ResolvePublicCategories(ctx, pair.B.Store.ID(), []ids.ProductID{productA.ID})
+	if err != nil || len(foreign) != 0 {
+		t.Fatalf("foreign categories = %#v, error = %v", foreign, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE catalog_categories SET status='archived',archived_at=$1 WHERE store_id=$2::uuid AND category_id=$3::uuid`, now, pair.A.Store.ID().String(), categoryA.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := repository.ResolvePublicCategories(ctx, pair.A.Store.ID(), []ids.ProductID{productA.ID})
+	if err != nil || len(archived) != 0 {
+		t.Fatalf("archived categories = %#v, error = %v", archived, err)
+	}
+}
+
 func newCategory(tb testing.TB, storeID ids.StoreID, slug string) domain.Category {
 	tb.Helper()
 	id, _ := ids.NewCategoryID()

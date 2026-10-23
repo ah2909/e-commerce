@@ -32,6 +32,6 @@ Stop the worker first, then return API replicas to the last image known to suppo
 
 ## Release gates
 
-Run `make verify`, `make container-build`, `make sbom`, `make container-scan`, and `make secret-scan`. Against a disposable API, run `make zap-baseline`; against production-like synthetic fixtures, run `make load-smoke`. A missing tool, failed scan, unavailable external environment, or unresolved critical/high finding is a failed gate rather than a pass.
+Run `make verify`, `make container-build`, `make sbom`, `make container-scan`, and `make secret-scan`. Against a disposable API, run `make zap-baseline`; against production-like synthetic fixtures, run a versioned load scenario. The local load scenario is currently absent, so record that check as unavailable until a scenario is supplied. A missing tool, failed scan, unavailable external environment, or unresolved critical/high finding is a failed gate rather than a pass.
 
 Before launch, the environment owner must record DNS/TLS and direct-host preservation, trusted proxy ranges, network policy, secret injection, Kafka TLS/SASL/ACLs and 30-day topic retention, PostgreSQL encrypted PITR, paging delivery, image digest, schema version, pool arithmetic, and the measured restore and load reports.

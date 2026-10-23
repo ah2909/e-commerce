@@ -60,14 +60,21 @@ type PublicMedia struct {
 	Position  int    `json:"position"`
 }
 
+type PublicCategory struct {
+	CategoryID ids.CategoryID `json:"category_id"`
+	Name       string         `json:"name"`
+	Slug       string         `json:"slug"`
+}
+
 type PublicProduct struct {
-	ProductID   ids.ProductID   `json:"product_id"`
-	Name        string          `json:"name"`
-	Slug        string          `json:"slug"`
-	Description string          `json:"description"`
-	PublishedAt time.Time       `json:"published_at"`
-	Variants    []PublicVariant `json:"variants"`
-	Media       []PublicMedia   `json:"media"`
+	ProductID   ids.ProductID    `json:"product_id"`
+	Name        string           `json:"name"`
+	Slug        string           `json:"slug"`
+	Description string           `json:"description"`
+	PublishedAt time.Time        `json:"published_at"`
+	Variants    []PublicVariant  `json:"variants"`
+	Media       []PublicMedia    `json:"media"`
+	Categories  []PublicCategory `json:"categories"`
 }
 
 type PublicPage struct {
@@ -107,6 +114,7 @@ type Repository interface {
 	ArchiveCategory(context.Context, ids.StoreID, ids.CategoryID, int64, time.Time) (domain.Category, error)
 	GetPublishedBySlug(context.Context, ids.StoreID, string) (domain.Product, error)
 	ListPublished(context.Context, ids.StoreID, int, *PublishedCursor) ([]domain.Product, error)
+	ResolvePublicCategories(context.Context, ids.StoreID, []ids.ProductID) (map[ids.ProductID][]PublicCategory, error)
 }
 
 type Publisher interface {
@@ -328,10 +336,34 @@ func (service Service) GetPublicProduct(ctx context.Context, storeID ids.StoreID
 	if !ok {
 		return PublicProduct{}, ErrNotFound
 	}
+	categories, err := service.repository.ResolvePublicCategories(ctx, storeID, []ids.ProductID{product.ID})
+	if err != nil {
+		return PublicProduct{}, fmt.Errorf("resolve public categories: %w", err)
+	}
+	projected.Categories = append([]PublicCategory{}, categories[product.ID]...)
 	return projected, nil
 }
 
 func (service Service) ListPublicProducts(ctx context.Context, storeID ids.StoreID, limit int, encoded string) (PublicPage, error) {
+	page, err := service.listPublicProducts(ctx, storeID, limit, encoded)
+	if err != nil || len(page.Products) == 0 {
+		return page, err
+	}
+	productIDs := make([]ids.ProductID, len(page.Products))
+	for index, product := range page.Products {
+		productIDs[index] = product.ProductID
+	}
+	categories, err := service.repository.ResolvePublicCategories(ctx, storeID, productIDs)
+	if err != nil {
+		return PublicPage{}, fmt.Errorf("resolve public categories: %w", err)
+	}
+	for index := range page.Products {
+		page.Products[index].Categories = append([]PublicCategory{}, categories[page.Products[index].ProductID]...)
+	}
+	return page, nil
+}
+
+func (service Service) listPublicProducts(ctx context.Context, storeID ids.StoreID, limit int, encoded string) (PublicPage, error) {
 	if service.prices == nil {
 		return PublicPage{}, ErrNotFound
 	}

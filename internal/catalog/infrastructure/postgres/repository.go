@@ -321,6 +321,35 @@ func (repository *Repository) GetPublishedBySlug(ctx context.Context, storeID id
 	return product, err
 }
 
+func (repository *Repository) ResolvePublicCategories(ctx context.Context, storeID ids.StoreID, productIDs []ids.ProductID) (map[ids.ProductID][]application.PublicCategory, error) {
+	result := make(map[ids.ProductID][]application.PublicCategory)
+	if storeID == "" || len(productIDs) > application.MaxPageSize {
+		return nil, domain.ErrInvalidCatalog
+	}
+	if len(productIDs) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ProductID  ids.ProductID
+		CategoryID ids.CategoryID
+		Name       string
+		Slug       string
+	}
+	err := repository.db.WithContext(ctx).Table("catalog_product_categories AS assignments").
+		Select("assignments.product_id, categories.category_id, categories.name, categories.slug").
+		Joins("JOIN catalog_categories AS categories ON categories.store_id = assignments.store_id AND categories.category_id = assignments.category_id AND categories.status = 'active'").
+		Joins("JOIN catalog_products AS products ON products.store_id = assignments.store_id AND products.product_id = assignments.product_id AND products.status = 'published'").
+		Where("assignments.store_id = ? AND assignments.product_id IN ?", storeID.String(), productIDs).
+		Order("assignments.product_id, categories.name, categories.category_id").Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("resolve public categories: %w", err)
+	}
+	for _, row := range rows {
+		result[row.ProductID] = append(result[row.ProductID], application.PublicCategory{CategoryID: row.CategoryID, Name: row.Name, Slug: row.Slug})
+	}
+	return result, nil
+}
+
 func (repository *Repository) ListPublished(ctx context.Context, storeID ids.StoreID, limit int, cursor *application.PublishedCursor) ([]domain.Product, error) {
 	products := make([]domain.Product, 0)
 	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

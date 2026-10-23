@@ -1,5 +1,23 @@
 name: ecommerce-dev
 
+x-app: &app
+  image: ecommerce-backend:local
+  build:
+    context: .
+  env_file: .env
+  environment: &app-environment
+    DATABASE_URL: postgres://ecommerce:ecommerce@postgres:5432/ecommerce?sslmode=disable
+    REDIS_ADDRESS: redis:6379
+    KAFKA_BROKERS: kafka:29092
+    HTTP_ADDRESS: :8080
+    METRICS_ADDRESS: :9090
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 45s
+
 services:
   postgres:
     image: postgres:18.6
@@ -76,7 +94,80 @@ services:
         done
     restart: "no"
 
+  migrate:
+    <<: *app
+    entrypoint: [/migrate]
+    command: [up]
+    profiles: [app]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    profiles: [app]
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, /healthcheck, http://127.0.0.1:8080/health/ready]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  worker:
+    <<: *app
+    entrypoint: [/worker]
+    profiles: [app]
+    depends_on:
+      api:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+
+  tools: &tools
+    build:
+      context: .
+      target: toolchain
+    profiles: [tools]
+    working_dir: /src
+    env_file: .env
+    environment:
+      <<: *app-environment
+      APP_ENV: test
+      DATABASE_URL: postgres://ecommerce:ecommerce@localhost:5432/ecommerce?sslmode=disable
+      TEST_DATABASE_URL: postgres://ecommerce:ecommerce@localhost:5432/ecommerce_test?sslmode=disable
+      ALLOW_TEST_DATABASE_MUTATION: "true"
+    volumes:
+      - .:/src
+      - go-modules:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      - go-tools:/src/.tools
+    entrypoint: [make]
+    command: [vulncheck]
+
+  verify:
+    <<: *tools
+    # The test database guard requires loopback even inside Docker.
+    network_mode: service:postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+    command: [verify]
+
 volumes:
   postgres-data:
   redis-data:
   kafka-data:
+  go-modules:
+  go-build:
+  go-tools:

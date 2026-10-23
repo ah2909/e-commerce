@@ -12,9 +12,17 @@ import (
 )
 
 type repositoryStub struct {
-	product   domain.Product
-	published []domain.Product
-	listCalls int
+	product       domain.Product
+	published     []domain.Product
+	listCalls     int
+	categories    map[ids.ProductID][]PublicCategory
+	categoryStore ids.StoreID
+	categoryError error
+}
+
+func (stub *repositoryStub) ResolvePublicCategories(_ context.Context, storeID ids.StoreID, _ []ids.ProductID) (map[ids.ProductID][]PublicCategory, error) {
+	stub.categoryStore = storeID
+	return stub.categories, stub.categoryError
 }
 
 func (stub *repositoryStub) CreateProduct(_ context.Context, _ ids.StoreID, product domain.Product) (domain.Product, error) {
@@ -117,6 +125,30 @@ func TestPublicProjectionHidesUnpricedVariantsAndAuthoringFields(t *testing.T) {
 	}
 	if len(page.Products) != 1 || len(page.Products[0].Variants) != 1 || page.Products[0].Variants[0].VariantID != pricedID || !page.Products[0].Variants[0].Price.VATInclusive {
 		t.Fatalf("page = %#v", page)
+	}
+}
+
+func TestPublicCategoriesUseRequestedStoreAndPropagateFailure(t *testing.T) {
+	store, _ := ids.NewStoreID()
+	productID, _ := ids.NewProductID()
+	variantID, _ := ids.NewVariantID()
+	categoryID, _ := ids.NewCategoryID()
+	now := time.Now().UTC()
+	price, _ := money.New(990000, "VND")
+	product := domain.Product{StoreID: store, ID: productID, Name: "Jersey", Slug: "jersey", Status: domain.ProductStatusPublished, PublishedAt: &now, Variants: []domain.Variant{{ID: variantID, Status: domain.ItemActive}}}
+	repository := &repositoryStub{published: []domain.Product{product}, categories: map[ids.ProductID][]PublicCategory{productID: {{CategoryID: categoryID, Name: "Brand Nike", Slug: "brand-nike"}}}}
+	service := NewService(repository, IDGenerator{}, time.Now).WithPublication(nil, priceResolverStub{values: map[ids.VariantID]money.Money{variantID: price}})
+	page, err := service.ListPublicProducts(context.Background(), store, 25, "")
+	if err != nil || repository.categoryStore != store || len(page.Products[0].Categories) != 1 || page.Products[0].Categories[0].CategoryID != categoryID {
+		t.Fatalf("public categories = %#v, error = %v", page, err)
+	}
+	detail, err := service.GetPublicProduct(context.Background(), store, "jersey")
+	if err != nil || len(detail.Categories) != 1 {
+		t.Fatalf("detail = %#v, error = %v", detail, err)
+	}
+	repository.categoryError = errors.New("category lookup unavailable")
+	if _, err := service.ListPublicProducts(context.Background(), store, 25, ""); !errors.Is(err, repository.categoryError) {
+		t.Fatalf("category failure = %v", err)
 	}
 }
 

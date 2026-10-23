@@ -34,28 +34,24 @@ The design covers the full MVP; the implementation does not yet. Read [developme
 
 Prerequisites:
 
-- Go version declared in [go.mod](go.mod)
-- GNU Make
 - Docker with Compose
+- GNU Make for the shortcuts below (optional when using Compose directly)
 
-Start disposable PostgreSQL, Redis, and Kafka dependencies:
-
-```bash
-make dev-deps
-```
-
-Apply runtime migrations and run the API:
+Copy `.env.example` to `.env` on a fresh checkout, then start the containerized API, worker, and dependencies:
 
 ```bash
-make migrate-up
-make run-api
+make docker-up
 ```
 
-Run the worker in another terminal when needed:
+The API listens at `http://localhost:8080`. Migrations run before the API starts. PostgreSQL, Redis, and Kafka retain their existing named volumes. Run checks with the same Go version inside Linux containers:
 
 ```bash
-make run-worker
+make docker-vulncheck
+make docker-verify
+make docker-stop
 ```
+
+See [container development](docs/container-development.md) for commands without Make, logs, rebuilds, test isolation, and Go version updates.
 
 Health endpoints:
 
@@ -64,17 +60,9 @@ curl -i http://localhost:8080/health/live
 curl -i http://localhost:8080/health/ready
 ```
 
-Stop dependencies without deleting their volumes:
-
-```bash
-make dev-deps-down
-```
-
-For a ready-to-use demo and the steps to provision another store, see [local store setup](docs/local-store-setup.md).
-
 ## Configuration
 
-[`.env.example`](.env.example) lists development configuration and disposable local credentials. `make` supplies those development defaults; direct `go run` commands require the variables in the process environment.
+[`.env.example`](.env.example) lists development configuration and disposable local credentials. Local containers read `.env`; Compose supplies container-network addresses. Direct Go commands require configuration in the process environment.
 
 Important boundaries:
 
@@ -96,8 +84,8 @@ The public contract currently implemented is [api/openapi.json](api/openapi.json
 ## Database operations
 
 ```bash
-make migrate-up
-make migrate-status
+docker compose run --rm migrate up
+docker compose run --rm migrate status
 ```
 
 Migrations are forward-only. Use a forward fix for schema recovery. Production migration or database reset requires explicit operational authorization.
@@ -105,8 +93,7 @@ Migrations are forward-only. Use a forward fix for schema recovery. Production m
 Integration tests use a separately guarded test database:
 
 ```bash
-make migrate-test-up
-make test-integration
+docker compose run --build --rm verify test-integration
 ```
 
 Live MoMo acceptance uses an isolated test order, the MoMo Test app, a publicly reachable HTTPS API, and sandbox merchant credentials. Set the `MOMO_SANDBOX_*` variables consumed by `cmd/momo-sandbox`, then run:
@@ -124,20 +111,20 @@ Required inputs are `MOMO_SANDBOX_APP_URL`, `MOMO_SANDBOX_STORE_HOST`, `MOMO_SAN
 Run the complete local gate with dependencies available:
 
 ```bash
-make verify
+make docker-verify
 ```
 
 Individual checks are:
 
 ```bash
-make fmt-check
-make lint
-make test
-make test-integration
-make vulncheck
+docker compose run --rm tools fmt-check
+docker compose run --rm tools lint
+docker compose run --rm tools test
+docker compose run --rm verify test-integration
+make docker-vulncheck
 ```
 
-On native Windows, race-enabled Go tests may be unavailable; use CI or WSL for race evidence. Never interpret an unavailable integration dependency or vulnerability database as a passing check.
+Run `make` to see the everyday Docker commands. The remaining direct check targets support CI and container tooling; runtime configuration lives in `.env`, not the Makefile. Linux containers run race-enabled tests. Never interpret an unavailable integration dependency or vulnerability database as a passing check.
 
 ## Delivery workflow
 
