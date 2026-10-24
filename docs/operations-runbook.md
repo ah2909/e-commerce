@@ -67,7 +67,7 @@ DATABASE_URL=<source> BACKUP_OUTPUT=<timestamp>.dump.age BACKUP_AGE_RECIPIENT=<r
 RESTORE_DATABASE_URL=<loopback-restore-url> BACKUP_INPUT=<timestamp>.dump.age BACKUP_AGE_IDENTITY=<identity-file> sh ops/restore-drill.sh
 ```
 
-After the script, verify schema 13, representative cross-store denial, order/payment and stock/ledger invariants, outbox continuity, and decryption using every referenced key version. Start API and worker against the disposable restore, check readiness, rebuild Search/Analytics/email-intent projections from retained events or authoritative tables, and record backup timestamp, restore start/end, RPO, RTO, row counts, image digest, and operator. Destroying the disposable target requires separate authorization; the scripts never modify the source.
+After the script, verify the restored schema matches the selected release (currently through migration 00015), representative cross-store denial, order/payment and stock/ledger invariants, outbox continuity, and decryption using every referenced key version. Start API and worker against the disposable restore, check readiness, rebuild Search/Analytics/email-intent projections from retained events or authoritative tables, and record backup timestamp, restore start/end, RPO, RTO, row counts, image digest, and operator. Destroying the disposable target requires separate authorization; the scripts never modify the source.
 
 ## Incident and rollback checklist
 

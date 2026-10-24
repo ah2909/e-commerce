@@ -18,6 +18,21 @@ Tests protect behavior whose failure would be expensive: tenant isolation, autho
 
 Prefer a small number of behavior-oriented tests over one test file per implementation file. Tests may be grouped by package or use case when that makes the protected behavior easier to understand.
 
+## File organization and reading code
+
+Go discovers tests by the `_test.go` suffix within a package; it does not require a matching test file for each source file. See the [Go testing guide](https://go.dev/doc/code#Testing).
+
+- Keep unit tests beside their package, grouped by behavior or use case: `checkout_test.go`, `permissions_test.go`, or one `domain_test.go` for a small cohesive domain package.
+- Use multiple files when scenarios have different setup or the combined file becomes difficult to navigate. A file-count target is not a reason to create a large test file.
+- Keep real-infrastructure tests behind the existing `integration` build tag and name them by workflow, such as `checkout_integration_test.go` or `refund_integration_test.go`.
+- Keep end-to-end tests for a few critical API journeys. Do not repeat every domain edge case at HTTP, service, repository, and API layers; each layer should cover its own failure modes.
+- Prefer external `package name_test` for public-boundary tests when practical. Use the package itself when testing an internal invariant is necessary; moving these tests into another directory changes package access.
+- Reuse genuinely shared infrastructure setup in `internal/testsupport`; keep business fixtures near the behavior they serve.
+
+For this repository, the first useful consolidation candidates are small related domain suites such as Stores' store, role, and membership tests. The Orders PostgreSQL suites already group distinct checkout, payment, refund, and fulfillment workflows; combining them would make navigation harder. Consolidate tests when touching the relevant behavior, preserving distinct denial, rollback, replay, and race cases.
+
+For a quieter VS Code Explorer, add `"files.exclude": { "**/*_test.go": true }` in workspace settings and remove that entry when browsing tests. This changes only the view; `go test` and CI still discover the tests. Search production Go with `rg --files -g '*.go' -g '!**/*_test.go'`.
+
 ## Required high-risk cases
 
 - Tenant scope comes from authenticated context, every tenant query includes `store_id`, and cross-store access fails closed.

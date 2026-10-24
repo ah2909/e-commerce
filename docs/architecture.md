@@ -2,11 +2,11 @@
 
 ## Scope and status
 
-This document describes the target architecture for the MVP and its intended growth path. It is not an implementation-completion claim; see [development status](development-status.md).
+This document describes the target architecture for the MVP and its intended growth path. It is not an implementation-completion claim; see [remaining work and release blockers](../TASKS.md).
 
 The system begins as a modular monolith deployed as one stateless API process and one stateless worker process. PostgreSQL is the authoritative transactional store. Redis provides bounded ephemeral coordination. Kafka carries asynchronous integration events published through a transactional outbox. Object storage holds product media and generated documents.
 
-The API uses Gin for route registration and transport middleware while the standard `http.Server` retains lifecycle and timeout ownership. Runtime PostgreSQL adapters use GORM over one explicitly configured `database/sql` pool. Gin and GORM remain outside application and domain packages, and Goose SQL migrations remain the only schema authority. See the [Gin and GORM placement guide](gin-gorm-guide.md) and [ADR 005](decisions/005-gin-gorm-runtime-adapters.md).
+The API uses Gin for route registration and transport middleware while the standard `http.Server` retains lifecycle and timeout ownership. Runtime PostgreSQL adapters use GORM over one explicitly configured `database/sql` pool. Gin and GORM remain outside application and domain packages, and Goose SQL migrations remain the only schema authority. See the [Gin and GORM placement guide](gin-gorm-guide.md).
 
 ## Design goals
 
@@ -227,9 +227,4 @@ No fixed store count or traffic estimate was supplied. Capacity is therefore est
 - [Database design](database-design.md)
 - [Event catalog](event-catalog.md)
 - [Testing strategy](testing-strategy.md)
-- [Implementation roadmap](implementation-roadmap.md)
-- [Development status](development-status.md)
-- [ADR 001: modular monolith](decisions/001-modular-monolith.md)
-- [ADR 002: shared-schema tenancy](decisions/002-shared-schema-tenancy.md)
-- [ADR 003: identity and host-selected stores](decisions/003-identity-sessions-and-store-authorization.md)
-- [ADR 004: transactional outbox](decisions/004-transactional-outbox.md)
+- [Remaining work](../TASKS.md)

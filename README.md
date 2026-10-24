@@ -2,23 +2,26 @@
 
 Go backend for independent Vietnamese stores. It is designed for subdomain-isolated SaaS and customer-managed deployments, with PostgreSQL as the transactional source of truth.
 
-The design covers the full MVP; the implementation does not yet. Read [development status](docs/development-status.md) before using or deploying the current code.
+Commerce APIs and workers are implemented; live-provider and production-environment validation remain open. Read [remaining work and release blockers](TASKS.md) before deploying.
 
 ## Documentation
 
 | Document | Purpose |
 | --- | --- |
+| [Feature inventory](FEATURES.md) | Current capabilities, implementation status, and limits; updated with feature changes |
 | [Product requirements](docs/product-requirements.md) | Actors, MVP behavior, exclusions, and success criteria |
 | [System architecture](docs/architecture.md) | Components, module boundaries, deployment modes, security, reliability, and scaling |
 | [Domain model](docs/domain-model.md) | Aggregates, invariants, and state transitions |
 | [Database design](docs/database-design.md) | Table ownership, tenant keys, constraints, indexes, transactions, retention, and growth |
 | [Event catalog](docs/event-catalog.md) | Versioned integration facts and delivery rules |
 | [Testing strategy](docs/testing-strategy.md) | Required correctness, isolation, provider, concurrency, and operational tests |
-| [Implementation roadmap](docs/implementation-roadmap.md) | Ordered delivery slices and release milestones |
-| [Development status](docs/development-status.md) | Evidence-backed implemented, incomplete, and not-started state |
-| [Architecture decisions](docs/decisions/) | Durable decisions and consequences |
 | [Development workflow](docs/development-workflow.md) | Task approval, build, review, fix, and verification gates |
-| [Task index](tasks/README.md) | Active work and archived delivery records |
+| [Remaining work](TASKS.md) | Outstanding tasks, deferred risks, and release gates |
+| [Container development](docs/container-development.md) | Local runtime and containerized checks |
+| [Production deployment](docs/production-deployment.md) | Release order, configuration, and launch gates |
+| [Operations runbook](docs/operations-runbook.md) | Incidents, rotation, retention, and recovery |
+| [Event operations](docs/event-operations.md) | Worker contracts, failures, and replay |
+| [Capacity and security](docs/capacity-and-security.md) | Required load, query, and security evidence |
 
 ## Architecture summary
 
@@ -128,4 +131,4 @@ Run `make` to see the everyday Docker commands. The remaining direct check targe
 
 ## Delivery workflow
 
-Delivery is manual. Invoke `$ec-plan`, `$ec-build`, `$ec-review`, `$ec-fix`, or `$ec-test` when you want that stage; each stops at its boundary. Ordinary requests and `continue` do not activate the workflow. `$ecommerce-delivery` explicitly selects the full sequence for a specified task. See the [development workflow](docs/development-workflow.md) and [task index](tasks/README.md).
+Delivery is manual. Invoke `$ec-plan`, `$ec-build`, `$ec-review`, `$ec-fix`, or `$ec-test` when you want that stage; each stops at its boundary. Ordinary requests and `continue` do not activate the workflow. `$ecommerce-delivery` explicitly selects the full sequence for a specified task. See the [development workflow](docs/development-workflow.md) and [remaining work](TASKS.md).

@@ -2,7 +2,7 @@
 
 ## Purpose and status
 
-This document is the logical PostgreSQL design for the target MVP. It guides future migrations but does not imply that every table exists; see [development status](development-status.md) for the implemented schema.
+This document is the logical PostgreSQL design for the target MVP. It guides future migrations but does not imply that every table exists; see [remaining work and release blockers](../TASKS.md) for open implementation and release gaps. Goose migrations define the implemented schema.
 
 PostgreSQL is authoritative for tenant identity, commerce, payments, idempotency, audit, and durable event handoff. Redis, Kafka, search indexes, and object storage are derived or ephemeral systems and cannot replace these records.
 
@@ -77,6 +77,8 @@ The initial release stores no platform identity rows. Store provisioning is auth
 | `store_staff_permissions` | Optional explicit staff permissions | PK `(store_id,user_id,permission)`; tenant FK to membership |
 
 Subdomain lookup has a global unique index because routing occurs before tenant authentication. Normal store APIs still load by `store_id` after resolution.
+
+Migration 00014 adds tenant-owned `store_appearances` with validated JSON content, optimistic versioning, and audited updates. Migration 00015 allows an empty district in saved and snapshotted Vietnamese addresses while retaining the other address constraints. See the versioned SQL in [migrations](../migrations/) for the physical schema.
 
 ### Identity
 

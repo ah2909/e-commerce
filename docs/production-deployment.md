@@ -11,7 +11,7 @@ The initial topology is one PostgreSQL authority, Redis for rate limits and sess
 1. Pin `APP_IMAGE` to the reviewed image digest and inject secrets from the deployment secret manager. Do not copy a populated environment file into the image.
 2. Render `deploy/compose.production.yml`, run `/config-check`, and confirm the combined API and worker replica pool maximum remains below the PostgreSQL connection budget with administrative reserve. Each API replica reserves one pool connection for its payment-key writer fence, so `DATABASE_MAX_OPEN` is at least two and that reservation is included in the budget.
 3. Back up PostgreSQL, record backup age, confirm PITR coverage, and retain every payment key version referenced by the database.
-4. Run `/migrate status`, then the one-shot `/migrate up`. Migration 13 only creates two partial retention indexes. On large tables, create those indexes concurrently in a separate change window before enabling retention.
+4. Run `/migrate status`, then the one-shot `/migrate up`. Apply the current migration set (through 00015 in this checkout); migration 13 creates two partial retention indexes. On large tables, create those indexes concurrently in a separate change window before enabling retention.
 5. Start API replicas, wait for `/health/ready`, verify the internal `/metrics` listener and trace collector, then start workers. Kafka failure does not make checkout unready.
 6. Exercise one storefront read, authenticated mutation, checkout fixture, worker publication, and consumer projection. Confirm alerts are routed to an owned receiver.
 7. Replace replicas one at a time. A termination must drain inside `SHUTDOWN_TIMEOUT` and the deployment's 45-second grace period.
@@ -28,7 +28,7 @@ RUNTIME_ENV_FILE=production.env docker compose --env-file deploy/production.env 
 
 ## Rollback and forward fix
 
-Stop the worker first, then return API replicas to the last image known to support schema 13. Do not run migration down or restore production as a routine rollback. Keep both payment encryption keys during an in-progress rotation. If a forward-only migration is not backward compatible, stop the rollout and deploy a forward fix. Retention stays on hold until restore, replay, and monitoring checks have passed.
+Stop the worker first, then return API replicas to the last image known to support the deployed schema. Do not run migration down or restore production as a routine rollback. Keep both payment encryption keys during an in-progress rotation. If a forward-only migration is not backward compatible, stop the rollout and deploy a forward fix. Retention stays on hold until restore, replay, and monitoring checks have passed.
 
 ## Release gates
 

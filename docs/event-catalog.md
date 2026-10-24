@@ -121,7 +121,7 @@ The initial consumer groups are `search-projection-v1`, `analytics-projection-v1
 
 ## Retention and privacy
 
-- Retain outbox/inbox rows long enough to diagnose and safely cover broker/consumer replay windows; exact periods are an operator decision before production.
+- Retain published outbox and processed inbox rows for at least 30 days, Kafka topics for the same replay floor, and resolved dead letters for 90 days. Unresolved/terminal rows remain indefinite; use the incident hold and bounded cleanup in the [operations runbook](operations-runbook.md).
 - Partition only when measured table/index maintenance or retention deletion justifies it, following [database design](database-design.md).
 - Redaction is part of schema review. Encrypting a topic does not justify publishing secrets or unnecessary personal data.
 - Only fully contract-valid envelopes may be retained for replay; every other terminal record stores broker coordinates, a digest, and bounded diagnostics only.

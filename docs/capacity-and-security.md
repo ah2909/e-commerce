@@ -2,7 +2,7 @@
 
 ## Unmeasured launch envelope
 
-No launch hardware, traffic forecast, store count, catalog size, or tenant-skew distribution has been supplied. Repository checks therefore establish bounded behavior but do not establish production throughput, the 99.5% SLO, the 15-minute RPO, or the four-hour RTO. The current safe envelope is limited to configured bounds: 1-50 load-test VUs for two minutes, at most 200 database connections per process, event batches up to 500, retention batches up to 1,000 per eligible table, and payment rotation batches up to 500.
+No launch hardware, traffic forecast, store count, catalog size, or tenant-skew distribution has been supplied. Repository checks therefore establish bounded behavior but do not establish production throughput, the 99.5% SLO, the 15-minute RPO, or the four-hour RTO. Configured limits are not a measured safe capacity envelope: database connections are capped at 200 per process, event batches at 500, retention batches at 1,000 per eligible table, and payment rotation batches at 500. No versioned load scenario is currently checked in; supply one before claiming a tested workload envelope.
 
 Before launch, create deterministic synthetic tenants with one tenant holding at least 80% of products/orders and no real personal or credential data. Exercise storefront reads, login throttling, cart mutation, checkout contention on last stock, admin reconciliation lists, and concurrent event/expiry pressure. Increase load in steps and stop immediately on tenant leakage, oversell, duplicate financial effects, p95 breach sustained for five minutes, error rate above 1%, pool use above 90%, increasing pool waits, lock timeout growth, oldest due outbox above 60 seconds, or CPU/memory above 80% for ten minutes.
 

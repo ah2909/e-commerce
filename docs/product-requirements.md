@@ -4,7 +4,7 @@
 
 Provide a reusable commerce backend for independent Vietnamese retailers. The same application supports a shared SaaS deployment, where stores are isolated by subdomain, and customer-managed deployments operated by a customer or implementation partner.
 
-This document defines intended behavior. [Development status](development-status.md) identifies what is implemented today.
+This document defines intended behavior. [Remaining work](../TASKS.md) tracks outstanding implementation and release gaps.
 
 ## Product principles
 

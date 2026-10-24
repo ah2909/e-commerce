@@ -12,14 +12,15 @@ Build a maintainable multi-store e-commerce backend. Optimize for correctness, t
 - Keep changes limited to the active task. Do not implement adjacent roadmap items.
 - Ask before making an irreversible schema or public API decision not covered by the docs.
 - Never discard unrelated user changes.
+- Keep `FEATURES.md` current in the same change that adds, changes, deprecates, or removes a capability, including API, worker, integration, permission, configuration, and operator-tool behavior. Verify statuses against code and OpenAPI, record incomplete/live-validation limits, and keep unfinished actions in `TASKS.md`; changes with no feature impact need no inventory edit.
 
 ## Project delivery workflow
 
 - Apply `docs/development-workflow.md` only when the user explicitly invokes a delivery skill or requests that workflow. Ordinary requests do not activate delivery gates or reviewer agents.
 - The user controls stages manually with `ec-plan`, `ec-build`, `ec-review`, `ec-fix`, and `ec-test`; each runs one stage and stops. `continue` preserves the requested stage and does not enable automatic delivery.
 - `$ecommerce-delivery` explicitly selects the full workflow for the specified task. Do not infer this choice from an implementation request, an active task, or prior plan approval.
-- Keep each task record in exactly one owning repository: backend tasks in `e-commerce/tasks/`, frontend tasks in `e-commerce-ui/tasks/`. For mixed work, choose the repository owning the primary outcome and record sibling dependencies there; link to the canonical record instead of copying it.
-- Resolve or create the task record in its owning repository when requested or when an explicitly invoked workflow requires it. Do not ask the user to choose routine task numbers or paths.
+- Keep each task record in exactly one owning repository: backend work as entries in `e-commerce/TASKS.md`, frontend tasks in `e-commerce-ui/tasks/`. For mixed work, choose the repository owning the primary outcome and record sibling dependencies there; link to the canonical record instead of copying it.
+- Resolve or add the task entry in its owning repository when requested or when an explicitly invoked workflow requires it. Backend plans and delivery evidence stay in `TASKS.md`; do not recreate `tasks/` or require a task template. Do not ask the user to choose routine task numbers or paths.
 - Spawn separate architect and security reviewer agents in parallel only when the user selects the review stage or explicitly selects the full workflow. Use the project reviewer definitions under `.codex/agents/`, or pass their instructions explicitly when custom agent selection is unavailable.
 - Reviewers report findings only; they must not edit files, spawn agents, or restart the delivery workflow. The implementing agent owns fixes and final verification.
 - Unresolved blocking findings or failed/unavailable required checks prevent declaring the implementation complete.

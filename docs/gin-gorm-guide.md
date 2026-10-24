@@ -18,4 +18,4 @@ Cross-module workflows open one GORM transaction and pass its transaction-bound 
 
 GORM models describe runtime mapping, not deployment state. Goose migrations define all tables, indexes, constraints, triggers, backfills, and version history. Do not use `AutoMigrate`, `Migrator().Create*`, or `Migrator().Alter*` in runtime, tests, or development commands.
 
-Migration order is unchanged: apply Goose before deploying code that requires the resulting version. Task 007 requires schema version 2 and performs no data migration, so rollback is the previous binary against the same schema.
+Migration order is unchanged: apply Goose before deploying code that requires the resulting version. The original adapter migration did not change schema version 2. Current rollback compatibility must be checked against the release image and all subsequent Goose migrations.
