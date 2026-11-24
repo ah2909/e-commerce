@@ -114,7 +114,7 @@ Sources: [Eventing](internal/eventing/), [Search](internal/search/), [Analytics]
 | Database migrations | Implemented | Forward-only Goose migrations through 00015; guarded integration-test database tooling. |
 | Payment-key rotation | Implemented | Key-reference inventory, bounded re-encryption, and fenced retirement verification via `payment-key-rotate`. |
 | Event retention | Implemented | Report/cleanup commands, bounded eligible deletion, retention floors, and incident hold; financial/audit records remain excluded. |
-| Local runtime and checks | Implemented | Docker Compose API/worker/dependencies, containerized checks, formatting/lint/unit/integration/vulnerability targets, and CI. |
+| Local runtime and checks | Implemented | Docker Compose API/worker/dependencies, minimal local environment example with documented defaults, containerized checks, formatting/lint/unit/integration/vulnerability targets, and CI. |
 | Release security tooling | Implemented | Container build, SBOM, vulnerability/secret scans, and disposable ZAP baseline targets; available commands do not imply passing release evidence. |
 | Backup/restore tooling | Validation pending | Encrypted backup and guarded restore-drill scripts exist; selected-environment PITR, invariant/decryption/readiness checks, and measured RPO/RTO remain required. |
 | Production deployment | Validation pending | Image/deployment examples and runbooks exist; ingress, network policy, broker security, paging, rollout rehearsal, and launch approval remain open. |

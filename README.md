@@ -18,6 +18,7 @@ Commerce APIs and workers are implemented; live-provider and production-environm
 | [Development workflow](docs/development-workflow.md) | Task approval, build, review, fix, and verification gates |
 | [Remaining work](TASKS.md) | Outstanding tasks, deferred risks, and release gates |
 | [Container development](docs/container-development.md) | Local runtime and containerized checks |
+| [Configuration and security tools](docs/configuration-guide.md) | Plain-language settings guide, defaults, and when each tool is needed |
 | [Production deployment](docs/production-deployment.md) | Release order, configuration, and launch gates |
 | [Operations runbook](docs/operations-runbook.md) | Incidents, rotation, retention, and recovery |
 | [Event operations](docs/event-operations.md) | Worker contracts, failures, and replay |
@@ -65,7 +66,7 @@ curl -i http://localhost:8080/health/ready
 
 ## Configuration
 
-[`.env.example`](.env.example) lists development configuration and disposable local credentials. Local containers read `.env`; Compose supplies container-network addresses. Direct Go commands require configuration in the process environment.
+[`.env.example`](.env.example) contains a minimal local setup and disposable development credentials. Advanced settings use application defaults; see the [configuration and security tools guide](docs/configuration-guide.md) for explanations and optional overrides. Local containers read `.env`; Compose supplies container-network addresses. Direct Go commands require configuration in the process environment.
 
 Important boundaries:
 

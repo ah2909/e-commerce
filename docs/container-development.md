@@ -10,6 +10,8 @@ All local services are defined in `compose.yml`. Without a profile, Compose star
 
 Keep your existing `.env`. On a fresh checkout, copy `.env.example` to `.env` and configure local values first. Stop any host API using port 8080 and any host worker before starting their container equivalents.
 
+The example omits advanced settings that already have defaults. See [configuration and security tools](configuration-guide.md) for the meaning of each local setting and optional overrides.
+
 ```bash
 docker compose --profile app up -d --build --wait --wait-timeout 120
 docker compose logs -f api worker
