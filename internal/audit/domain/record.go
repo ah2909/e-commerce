@@ -11,6 +11,11 @@ import (
 
 var ErrInvalidRecord = errors.New("invalid audit record")
 
+const (
+	StoreHomepageDraftSaved = "store.homepage_draft_saved"
+	StoreHomepagePublished  = "store.homepage_published"
+)
+
 type Record struct {
 	StoreID     ids.StoreID
 	AuditID     AuditID
@@ -43,7 +48,8 @@ func NewRecord(storeID ids.StoreID, actorType ActorType, actorID, action, subjec
 	if storeID == "" || (actorType != ActorPlatformAdmin && actorType != ActorUser && actorType != ActorGuest) || actorID == "" || subjectID == "" || requestID == "" || occurredAt.IsZero() {
 		return Record{}, ErrInvalidRecord
 	}
-	validSubject := ((action == "store.created" || action == "store.appearance_updated") && subjectType == "store") || ((action == "membership.created" || action == "membership.updated" || action == "membership.permissions_updated") && subjectType == "membership") || (action == "inventory.adjusted" && subjectType == "inventory_stock_item") || (action == "payment.provider_configured" && subjectType == "payment_provider_config") || ((action == "payment.confirmed" || action == "payment.reconciliation_recorded") && subjectType == "payment") || (action == "order.cancelled" && subjectType == "order") || ((action == "refund.requested" || action == "refund.settled") && subjectType == "refund") || ((action == "shipment.prepared" || action == "shipment.updated" || action == "shipment.shipped" || action == "shipment.completed") && subjectType == "shipment")
+	storeAction := action == "store.created" || action == "store.appearance_updated" || action == StoreHomepageDraftSaved || action == StoreHomepagePublished
+	validSubject := (storeAction && subjectType == "store") || ((action == "membership.created" || action == "membership.updated" || action == "membership.permissions_updated") && subjectType == "membership") || (action == "inventory.adjusted" && subjectType == "inventory_stock_item") || (action == "payment.provider_configured" && subjectType == "payment_provider_config") || ((action == "payment.confirmed" || action == "payment.reconciliation_recorded") && subjectType == "payment") || (action == "order.cancelled" && subjectType == "order") || ((action == "refund.requested" || action == "refund.settled") && subjectType == "refund") || ((action == "shipment.prepared" || action == "shipment.updated" || action == "shipment.shipped" || action == "shipment.completed") && subjectType == "shipment")
 	if !validSubject {
 		return Record{}, ErrInvalidRecord
 	}

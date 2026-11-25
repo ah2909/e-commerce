@@ -45,6 +45,8 @@ func TestOpenAPIIncludesIdentityAndTenantRoutes(t *testing.T) {
 		"/api/v1/admin/refunds/{refund_id}", "/api/v1/admin/refunds/{refund_id}/momo-executions",
 		"/api/v1/admin/refunds/{refund_id}/vietqr-settlements",
 		"/api/v1/catalog/products", "/api/v1/catalog/products/{slug}",
+		"/api/v1/storefront/homepage", "/api/v1/admin/storefront/homepage",
+		"/api/v1/admin/storefront/homepage/publish",
 	}
 	for _, path := range wantPaths {
 		if _, ok := document.Paths[path]; !ok {
@@ -112,6 +114,12 @@ func TestOpenAPIReferencesAndOperationContracts(t *testing.T) {
 	assertSecurityScheme(t, document, "/api/v1/admin/orders/{order_id}/cancellations", "post", "bearerAuth")
 	assertSecurityScheme(t, document, "/api/v1/admin/refunds/{refund_id}/momo-executions", "post", "bearerAuth")
 	assertPublicOperation(t, document, "/api/v1/catalog/products", "get")
+	assertPublicOperation(t, document, "/api/v1/storefront/homepage", "get")
+	assertSecurityScheme(t, document, "/api/v1/admin/storefront/homepage", "get", "bearerAuth")
+	assertOperationContract(t, document, "/api/v1/admin/storefront/homepage", "put", true, []string{"200", "400", "401", "403", "409"})
+	assertSecurityScheme(t, document, "/api/v1/admin/storefront/homepage", "put", "bearerAuth")
+	assertOperationContract(t, document, "/api/v1/admin/storefront/homepage/publish", "post", true, []string{"200", "400", "401", "403", "409"})
+	assertSecurityScheme(t, document, "/api/v1/admin/storefront/homepage/publish", "post", "bearerAuth")
 	assertServer(t, document, "/api/v1/auth/social/{provider}/callback", "get", "https://auth.{baseDomain}")
 	assertOnboardingHasNoSession(t, document)
 	assertCatalogResponseSchemas(t, document)

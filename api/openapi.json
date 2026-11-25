@@ -2137,6 +2137,336 @@
 				"required": ["external_reference", "settled_at"],
 				"type": "object"
 			},
+			"HomepageHeroSection": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"id",
+					"type",
+					"layout"
+				],
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 64,
+						"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+					},
+					"type": {
+						"type": "string",
+						"const": "hero"
+					},
+					"hidden": {
+						"type": "boolean",
+						"const": false
+					},
+					"layout": {
+						"type": "string",
+						"enum": [
+							"split",
+							"stacked"
+						]
+					}
+				}
+			},
+			"HomepageCategoriesSection": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"id",
+					"type",
+					"title"
+				],
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 64,
+						"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+					},
+					"type": {
+						"type": "string",
+						"const": "categories"
+					},
+					"hidden": {
+						"type": "boolean"
+					},
+					"title": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					}
+				}
+			},
+			"HomepageFeaturedProductsSection": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"id",
+					"type",
+					"title"
+				],
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 64,
+						"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+					},
+					"type": {
+						"type": "string",
+						"const": "featured_products"
+					},
+					"hidden": {
+						"type": "boolean"
+					},
+					"title": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					},
+					"category_slug": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120,
+						"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+					}
+				}
+			},
+			"HomepageStorySection": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"id",
+					"type",
+					"title",
+					"body"
+				],
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 64,
+						"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+					},
+					"type": {
+						"type": "string",
+						"const": "story"
+					},
+					"hidden": {
+						"type": "boolean"
+					},
+					"title": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					},
+					"body": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 1000
+					},
+					"image_url": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 2048,
+						"pattern": "^https://"
+					},
+					"image_alt": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 160
+					}
+				},
+				"dependentRequired": {
+					"image_url": [
+						"image_alt"
+					],
+					"image_alt": [
+						"image_url"
+					]
+				}
+			},
+			"HomepageCallToActionSection": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"id",
+					"type",
+					"title",
+					"button_label"
+				],
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 64,
+						"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+					},
+					"type": {
+						"type": "string",
+						"const": "call_to_action"
+					},
+					"hidden": {
+						"type": "boolean"
+					},
+					"title": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					},
+					"button_label": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 60
+					},
+					"category_slug": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120,
+						"pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+					}
+				}
+			},
+			"HomepageSection": {
+				"oneOf": [
+					{
+						"$ref": "#/components/schemas/HomepageHeroSection"
+					},
+					{
+						"$ref": "#/components/schemas/HomepageCategoriesSection"
+					},
+					{
+						"$ref": "#/components/schemas/HomepageFeaturedProductsSection"
+					},
+					{
+						"$ref": "#/components/schemas/HomepageStorySection"
+					},
+					{
+						"$ref": "#/components/schemas/HomepageCallToActionSection"
+					}
+				]
+			},
+			"StorefrontHomepage": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"schema_version",
+					"mode"
+				],
+				"properties": {
+					"schema_version": {
+						"type": "integer",
+						"const": 1
+					},
+					"mode": {
+						"type": "string",
+						"enum": [
+							"default",
+							"custom"
+						]
+					},
+					"sections": {
+						"type": "array",
+						"maxItems": 12,
+						"items": {
+							"$ref": "#/components/schemas/HomepageSection"
+						}
+					}
+				},
+				"description": "Default mode uses the legacy layout and accepts no sections. Custom mode requires one visible hero, unique section IDs, and at most 12 sections. Section text and settings are limited to 32 KiB in aggregate.",
+				"allOf": [
+					{
+						"if": {
+							"properties": {
+								"mode": {
+									"const": "custom"
+								}
+							}
+						},
+						"then": {
+							"required": [
+								"sections"
+							],
+							"properties": {
+								"sections": {
+									"minItems": 1,
+									"contains": {
+										"properties": {
+											"type": {
+												"const": "hero"
+											}
+										}
+									},
+									"minContains": 1,
+									"maxContains": 1
+								}
+							}
+						},
+						"else": {
+							"properties": {
+								"sections": {
+									"maxItems": 0
+								}
+							}
+						}
+					}
+				]
+			},
+			"StorefrontHomepageState": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"draft",
+					"published",
+					"version"
+				],
+				"properties": {
+					"draft": {
+						"$ref": "#/components/schemas/StorefrontHomepage"
+					},
+					"published": {
+						"$ref": "#/components/schemas/StorefrontHomepage"
+					},
+					"version": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740991
+					}
+				}
+			},
+			"StorefrontHomepageDraftWrite": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"draft",
+					"expected_version"
+				],
+				"properties": {
+					"draft": {
+						"$ref": "#/components/schemas/StorefrontHomepage"
+					},
+					"expected_version": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740990
+					}
+				}
+			},
+			"StorefrontHomepagePublish": {
+				"type": "object",
+				"additionalProperties": false,
+				"required": [
+					"expected_version"
+				],
+				"properties": {
+					"expected_version": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 9007199254740990
+					}
+				}
+			},
 			"StorefrontAppearance": {
 				"type": "object",
 				"additionalProperties": false,
@@ -4903,6 +5233,178 @@
 				"responses": {
 					"200": { "description": "Dependencies are ready" },
 					"503": { "$ref": "#/components/responses/Problem" }
+				}
+			}
+		},
+		"/api/v1/storefront/homepage": {
+			"get": {
+				"operationId": "getPublishedStorefrontHomepage",
+				"security": [],
+				"description": "Read the published homepage for the store selected by request host.",
+				"responses": {
+					"200": {
+						"description": "Homepage layout",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/StorefrontHomepage"
+								}
+							}
+						}
+					},
+					"404": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"500": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"503": {
+						"$ref": "#/components/responses/Problem"
+					}
+				}
+			}
+		},
+		"/api/v1/admin/storefront/homepage": {
+			"get": {
+				"operationId": "getStorefrontHomepageState",
+				"security": [
+					{
+						"bearerAuth": []
+					}
+				],
+				"description": "Read draft, published layout, and version. Requires store.manage.",
+				"responses": {
+					"200": {
+						"description": "Homepage layout",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/StorefrontHomepageState"
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"403": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"404": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"500": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"503": {
+						"$ref": "#/components/responses/Problem"
+					}
+				}
+			},
+			"put": {
+				"operationId": "saveStorefrontHomepageDraft",
+				"security": [
+					{
+						"bearerAuth": []
+					}
+				],
+				"description": "Replace the private draft with an expected version. Requires store.manage. Request body limit is 64 KiB.",
+				"responses": {
+					"200": {
+						"description": "Homepage layout",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/StorefrontHomepageState"
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"401": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"403": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"404": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"409": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"500": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"503": {
+						"$ref": "#/components/responses/Problem"
+					}
+				},
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/StorefrontHomepageDraftWrite"
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/admin/storefront/homepage/publish": {
+			"post": {
+				"operationId": "publishStorefrontHomepage",
+				"security": [
+					{
+						"bearerAuth": []
+					}
+				],
+				"description": "Publish the saved draft at the expected version. Requires store.manage. A stale version or missing saved draft returns 409.",
+				"responses": {
+					"200": {
+						"description": "Homepage layout",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/StorefrontHomepageState"
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"401": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"403": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"404": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"409": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"500": {
+						"$ref": "#/components/responses/Problem"
+					},
+					"503": {
+						"$ref": "#/components/responses/Problem"
+					}
+				},
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/StorefrontHomepagePublish"
+							}
+						}
+					}
 				}
 			}
 		},

@@ -25,6 +25,7 @@ This file describes capabilities and limits. [TASKS.md](TASKS.md) owns unfinishe
 | Store information | Implemented | Authenticated store read with Vietnamese regional defaults and VND currency. |
 | Public storefront configuration | Implemented | Public display name, tagline, logo/hero HTTPS URLs, hero copy, announcement, and `home`, `fashion`, or `sport` preset; defaults when no appearance is saved. |
 | Storefront administration | Implemented | Permissioned appearance reads and versioned updates with audit; URL references do not provide an upload service. |
+| Storefront homepage composition API | Implemented | Tenant-scoped section drafts and explicit publication with optimistic versions and transactional audit. Public reads return only the published layout. Routes require schema 18. Local browser and PostgreSQL checks passed. Independent review and final verification remain pending in [frontend task 024](../e-commerce-ui/tasks/024-homepage-builder.md). |
 | Password accounts | Implemented | Store-local registration, login, current-user lookup, and Argon2id password verification. |
 | User sessions | Implemented | Opaque access/refresh tokens, rotation, refresh-reuse handling, and current-session logout. Deferred expiry/suspension risks remain in TASKS.md. |
 | Guest sessions | Implemented | Create, inspect, refresh, and log out store-bound guest sessions. |

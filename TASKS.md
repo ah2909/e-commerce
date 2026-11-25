@@ -2,7 +2,7 @@
 
 Reviewed 2026-10-24 against repository code, migrations, operational docs, and the previous task records. This file owns the remaining backend backlog and replaces the task directory, development-status snapshot, and implementation roadmap. Frontend work stays in the sibling repository.
 
-Commerce APIs, event workers, and local operational tooling exist. Live provider and deployment evidence is still incomplete; the backend is not certified production-ready. Goose migrations currently run through 00015 (store appearance in 00014 and optional address district in 00015). Historical test results below are carried forward from prior records, not rerun during this documentation cleanup.
+Commerce APIs, event workers, and local operational tooling exist. Live provider and deployment evidence is still incomplete; the backend is not certified production-ready. Goose migrations currently run through 00018. The [storefront homepage builder](../e-commerce-ui/tasks/024-homepage-builder.md) owns the delivery record for migrations 00016–00018. Historical test results below are carried forward from prior records, not rerun during this documentation cleanup.
 
 ## Before production
 

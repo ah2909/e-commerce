@@ -40,23 +40,31 @@ func (a Appearance) Validate() error {
 	}{
 		{a.DisplayName, 120, true}, {a.Tagline, 180, false}, {a.HeroTitle, 160, true}, {a.HeroText, 600, false}, {a.Announcement, 240, false},
 	} {
-		if !utf8.ValidString(field.value) || utf8.RuneCountInString(field.value) > field.limit || (field.required && strings.TrimSpace(field.value) == "") || strings.ContainsAny(field.value, "<>") {
+		if !validAppearanceText(field.value, field.limit, field.required) {
 			return ErrInvalidAppearance
-		}
-		for _, r := range field.value {
-			if unicode.IsControl(r) {
-				return ErrInvalidAppearance
-			}
 		}
 	}
 	for _, raw := range []string{a.LogoURL, a.HeroURL} {
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || strings.ContainsAny(raw, "<>\\\r\n\t ") {
+		if raw != "" && !validAppearanceImageURL(raw) {
 			return ErrInvalidAppearance
 		}
 	}
 	return nil
+}
+
+func validAppearanceText(value string, limit int, required bool) bool {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > limit || (required && strings.TrimSpace(value) == "") || strings.ContainsAny(value, "<>") {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validAppearanceImageURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && len(raw) <= 2048 && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == "" && !strings.ContainsAny(raw, "<>\\\r\n\t ")
 }

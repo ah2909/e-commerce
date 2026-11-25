@@ -180,18 +180,18 @@ func (handler Handler) internalError(w http.ResponseWriter, r *http.Request, err
 
 func decode(w http.ResponseWriter, r *http.Request, target any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		problem.Write(w, r, http.StatusBadRequest, "invalid_request", "Request body is invalid.", nil)
-		return false
-	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
+	if !decodeJSON(r.Body, target) {
 		problem.Write(w, r, http.StatusBadRequest, "invalid_request", "Request body is invalid.", nil)
 		return false
 	}
 	return true
+}
+
+func decodeJSON(body io.Reader, target any) bool {
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	var extra any
+	return decoder.Decode(target) == nil && decoder.Decode(&extra) == io.EOF
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

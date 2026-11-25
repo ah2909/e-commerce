@@ -180,6 +180,9 @@ func run() error {
 	if schemaVersion >= 14 {
 		storesHandler.RegisterAppearance(engine, hostMiddleware, storesapplication.NewAppearanceService(storeRepository))
 	}
+	if schemaVersion >= 18 {
+		storesHandler.RegisterHomepage(engine, hostMiddleware, storesapplication.NewHomepageService(storeRepository))
+	}
 	if catalogAvailable(schemaVersion) {
 		catalogRepository := catalogpostgres.NewRepository(connection.GORM)
 		catalogService := catalogapplication.NewService(catalogRepository, catalogapplication.DefaultIDGenerator(), time.Now)
